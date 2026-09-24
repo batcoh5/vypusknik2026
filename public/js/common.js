@@ -2,14 +2,6 @@
 
 export const VK_URL = 'https://vk.com/wkrasnoobskacontest';
 
-const NAV = [
-  ['/', 'Главная'],
-  ['/vote', 'Голосовать'],
-  ['/verify', 'Проверить голос'],
-  ['/ledger', 'Реестр'],
-  ['/results', 'Итоги'],
-];
-
 // ---------- иконки (Lucide-подобные, stroke) ----------
 
 const svg = (body, extra = '') =>
@@ -72,51 +64,9 @@ function brandHtml() {
 }
 
 export function renderChrome() {
-  const path = location.pathname.replace(/\.html$/, '').replace(/\/index$/, '/') || '/';
-
   document.body.prepend(
     el(`<div class="glows" aria-hidden="true"><div class="grid-bg"></div><div class="glow glow--a"></div><div class="glow glow--b"></div><div class="glow glow--c"></div></div>`),
   );
-
-  const header = el(`
-    <header class="header">
-      <div class="container header__inner">
-        ${brandHtml()}
-        <nav class="nav" aria-label="Основная навигация">
-          <span class="nav__pill"></span>
-          ${NAV.map(([href, label]) => `<a href="${href}"${href === path ? ' class="active" aria-current="page"' : ''}>${label}</a>`).join('')}
-        </nav>
-        <button class="nav-toggle" aria-label="Меню" aria-expanded="false"><span></span><span></span><span></span></button>
-      </div>
-    </header>`);
-  document.body.prepend(header);
-
-  const toggle = header.querySelector('.nav-toggle');
-  const nav = header.querySelector('.nav');
-  toggle.addEventListener('click', () => {
-    const open = nav.classList.toggle('open');
-    toggle.setAttribute('aria-expanded', String(open));
-  });
-
-  // «Пилюля», которая плавно переезжает под пункт меню.
-  const pill = nav.querySelector('.nav__pill');
-  const moveTo = (a) => {
-    if (!a) {
-      pill.style.opacity = '0';
-      return;
-    }
-    pill.style.width = a.offsetWidth + 'px';
-    pill.style.transform = `translateX(${a.offsetLeft}px)`;
-    pill.style.opacity = '1';
-  };
-  const active = nav.querySelector('a.active');
-  nav.querySelectorAll('a').forEach((a) => a.addEventListener('mouseenter', () => moveTo(a)));
-  nav.addEventListener('mouseleave', () => moveTo(active));
-  requestAnimationFrame(() => moveTo(active));
-
-  const onScroll = () => header.classList.toggle('scrolled', scrollY > 8);
-  addEventListener('scroll', onScroll, { passive: true });
-  onScroll();
 
   const footer = el(`
     <footer class="footer">
@@ -124,37 +74,26 @@ export function renderChrome() {
         <div class="footer__grid">
           <div class="footer__about">
             ${brandHtml()}
-            <p>Народное голосование ежегодного конкурса «Выпускник Краснообска» для выпускников 11-х классов школ рабочего посёлка Краснообск.</p>
-          </div>
-          <div>
-            <h4>Голосование</h4>
-            <ul>
-              <li><a href="/vote">Проголосовать</a></li>
-              <li><a href="/verify">Проверить голос</a></li>
-              <li><a href="/ledger">Открытый реестр</a></li>
-              <li><a href="/results">Итоги</a></li>
-            </ul>
+            <p>Зрительское голосование ежегодного конкурса «Выпускник Краснообска» для выпускников 11-х классов школ рабочего посёлка Краснообск.</p>
           </div>
           <div>
             <h4>Конкурс</h4>
             <ul>
               <li><a href="${VK_URL}" target="_blank" rel="noopener">Группа ВКонтакте ${icons.external}</a></li>
-              <li><a href="/#how">Как защищён голос</a></li>
-              <li><a href="/#faq">Вопросы и ответы</a></li>
             </ul>
           </div>
           <div>
             <h4>Организаторы</h4>
             <ul>
               <li>Администрация р.п. Краснообск</li>
-              <li>МБУ «Дом культуры»</li>
+              <li>МБУ р.п. Краснообска «Дом культуры»</li>
               <li>Молодёжный Краснообск</li>
             </ul>
           </div>
         </div>
         <div class="footer__bottom">
           <span>© ${new Date().getFullYear()} «Выпускник Краснообска». Все права защищены.</span>
-          <span>Голоса защищены шифрованием и открытым реестром</span>
+          <span>Зрительское голосование</span>
         </div>
         <svg class="footer__word" viewBox="0 0 1000 130" aria-hidden="true" preserveAspectRatio="xMidYMax meet">
           <defs><linearGradient id="fw" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".14"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient></defs>
@@ -179,7 +118,6 @@ export function renderChrome() {
 
   initReveal();
   initSpotlight();
-  pruneDeletedElections();
 }
 
 // ---------- анимации ----------
@@ -240,28 +178,6 @@ export function countUp(node, value, duration = 1200) {
 }
 
 // Эффект «печатающегося» текста (для хешей и квитанций).
-export function typeText(node, text, speed = 12) {
-  if (reduceMotion()) {
-    node.textContent = text;
-    return Promise.resolve();
-  }
-  node.textContent = '';
-  node.classList.add('typing');
-  return new Promise((resolve) => {
-    let i = 0;
-    const tick = () => {
-      i += 2;
-      node.textContent = text.slice(0, i);
-      if (i < text.length) setTimeout(tick, speed);
-      else {
-        node.classList.remove('typing');
-        resolve();
-      }
-    };
-    tick();
-  });
-}
-
 // Конфетти в фирменных цветах.
 export function confetti() {
   if (reduceMotion()) return;
@@ -407,20 +323,6 @@ export async function api(path, { method = 'GET', body, headers = {} } = {}) {
   return data;
 }
 
-// Загружает все блоки реестра голосования постранично.
-export async function fetchAllBlocks(electionId, onProgress) {
-  const blocks = [];
-  let total = Infinity;
-  while (blocks.length < total) {
-    const page = await api(`/api/elections/${electionId}/ledger?from=${blocks.length}&limit=500`);
-    total = page.total;
-    if (!page.blocks.length) break;
-    blocks.push(...page.blocks);
-    onProgress?.(blocks.length, total);
-  }
-  return blocks;
-}
-
 // Локальное хранилище может быть недоступно (приватный режим) — не падаем.
 export const store = {
   get(key) {
@@ -446,33 +348,7 @@ export const store = {
   },
 };
 
-// Квитанции и неотправленные бюллетени удалённых голосований стираются из браузера.
-let pruning;
-export function pruneDeletedElections() {
-  pruning ??= (async () => {
-    const ids = new Set();
-    try {
-      for (let i = 0; i < localStorage.length; i++) {
-        const m = localStorage.key(i)?.match(/^vyp26:(?:receipt|pending):(e[0-9a-f]+)$/);
-        if (m) ids.add(m[1]);
-      }
-    } catch {
-      return;
-    }
-    await Promise.all(
-      [...ids].map(async (id) => {
-        const res = await fetch(`/api/elections/${id}`).catch(() => null);
-        if (res?.status === 404) {
-          store.remove(receiptKey(id));
-          store.remove(pendingKey(id));
-        }
-      }),
-    );
-  })();
-  return pruning;
-}
-
-export const receiptKey = (electionId) => `receipt:${electionId}`;
+export const votedKey = (electionId) => `voted:${electionId}`;
 export const pendingKey = (electionId) => `pending:${electionId}`;
 
 // ---------- форматирование ----------
@@ -506,10 +382,6 @@ export function plural(n, one, few, many) {
   if (m10 === 1 && m100 !== 11) return one;
   if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
   return many;
-}
-
-export function shortHash(hash) {
-  return hash ? `${hash.slice(0, 8)}…${hash.slice(-6)}` : '';
 }
 
 export function initials(name) {

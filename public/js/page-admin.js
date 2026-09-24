@@ -56,16 +56,38 @@ function showLogin(error = '') {
 
 // ---------- список голосований ----------
 
+// Итоги: голоса и баллы (голоса / всего × 160) — как в выгрузке Excel.
+function resultsTable(e) {
+  const q = e.questions[0];
+  const counts = e.tally.counts[q.id];
+  const total = q.candidates.reduce((n, c) => n + (counts[c.id] ?? 0), 0);
+  const rows = [...q.candidates]
+    .sort((a, b) => counts[b.id] - counts[a.id])
+    .map((c, i) => {
+      const v = counts[c.id] ?? 0;
+      const points = total ? (v / total) * 160 : 0;
+      return `<tr><td>${i + 1}</td><td>${escapeHtml(c.name)}</td><td class="num">${formatNumber(v)}</td><td class="num">${points.toFixed(2)}</td></tr>`;
+    })
+    .join('');
+  return `
+    <div class="table-wrap top-gap-sm">
+      <table class="table results-table">
+        <thead><tr><th>№</th><th>Участник</th><th class="num">Голоса</th><th class="num">Баллы из 160</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr><td></td><td>Всего</td><td class="num">${formatNumber(total)}</td><td class="num">${total ? '160.00' : '0.00'}</td></tr></tfoot>
+      </table>
+    </div>`;
+}
+
 function electionCard(e) {
-  const noms = e.questions.length;
-  const cands = e.questions.reduce((n, q) => n + q.candidates.length, 0);
+  const cands = e.questions[0]?.candidates.length ?? 0;
   const meta = [
-    `${noms} ${plural(noms, 'номинация', 'номинации', 'номинаций')} · ${cands} ${plural(cands, 'вариант', 'варианта', 'вариантов')}`,
+    `${cands} ${plural(cands, 'участник', 'участника', 'участников')}`,
     `Создано ${formatDate(e.createdAt)}`,
     e.startedAt && `Запущено ${formatDate(e.startedAt)}`,
     e.endsAt && e.status !== 'finished' && `Окончание ${formatDate(e.endsAt)}`,
     e.finishedAt && `Завершено ${formatDate(e.finishedAt)}`,
-    e.status !== 'draft' && `Голосов: <b>${formatNumber(e.stats.ballotsCast)}</b> · выдано бюллетеней: ${formatNumber(e.stats.ballotsIssued)}`,
+    e.status !== 'draft' && `Проголосовало: <b>${formatNumber(e.stats.ballotsCast)}</b>`,
   ].filter(Boolean);
 
   const actions = {
@@ -75,21 +97,11 @@ function electionCard(e) {
       <button class="btn btn--danger btn--sm" data-act="delete">${icons.trash} Удалить</button>`,
     active: `
       <button class="btn btn--primary btn--sm" data-act="finish">${icons.stop} Завершить и подвести итоги</button>
-      <a class="btn btn--glass btn--sm" href="/vote" target="_blank">Открыть на сайте ${icons.external}</a>`,
+      <a class="btn btn--glass btn--sm" href="/" target="_blank">Открыть сайт ${icons.external}</a>`,
     finished: `
-      <a class="btn btn--glass btn--sm" href="/results" target="_blank">${icons.chart} Итоги</a>
+      <button class="btn btn--brand btn--sm" data-act="excel">${icons.download} Скачать итоги в Excel</button>
       <button class="btn btn--danger btn--sm" data-act="delete">${icons.trash} Удалить</button>`,
   }[e.status];
-
-  const winners =
-    e.tally &&
-    e.questions
-      .map((q) => {
-        const counts = e.tally.counts[q.id];
-        const best = [...q.candidates].sort((a, b) => counts[b.id] - counts[a.id])[0];
-        return `<li><span class="muted">${escapeHtml(q.title)}:</span> ${escapeHtml(best.name)} — ${formatNumber(counts[best.id])}</li>`;
-      })
-      .join('');
 
   return `
     <div class="card card--hover spot" data-id="${e.id}">
@@ -101,17 +113,30 @@ function electionCard(e) {
         ${statusBadge(e.status)}
       </div>
       <div class="election-card__meta">${meta.map((m) => `<span>${m}</span>`).join('')}</div>
-      ${winners ? `<ul class="small top-gap-sm winners">${winners}</ul>` : ''}
+      ${e.tally ? resultsTable(e) : ''}
       <div class="actions">${actions}</div>
     </div>`;
+}
+
+// Скачивание .xlsx с итогами (запрос с ключом администратора).
+async function downloadExcel(e) {
+  const res = await fetch(`/api/admin/elections/${e.id}/results.xlsx`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error((await res.json().catch(() => null))?.message ?? 'Не удалось скачать файл');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(await res.blob());
+  a.download = `Итоги — ${e.title}.xlsx`.replace(/[\\/:*?"<>|]/g, '');
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
 // Что сейчас видят посетители сайта.
 function siteState(elections, active) {
   if (active) return `Сейчас идёт: «${escapeHtml(active.title)}»`;
   const finished = elections.filter((e) => e.status === 'finished').sort((a, b) => b.finishedAt.localeCompare(a.finishedAt))[0];
-  if (finished) return `На сайте показаны итоги «${escapeHtml(finished.title)}». Удалите его, чтобы посетители видели «Голосование ещё не началось».`;
-  return 'Сейчас на сайте нет голосования — посетители видят «Голосование ещё не началось».';
+  if (finished) return `На сайте написано, что «${escapeHtml(finished.title)}» завершено. Удалите его, чтобы посетители видели «Голосование скоро начнётся».`;
+  return 'Сейчас голосования нет — посетители видят «Голосование скоро начнётся».';
 }
 
 async function showList() {
@@ -167,10 +192,10 @@ async function showList() {
       ${
         elections.length
           ? elections.map(electionCard).join('')
-          : `<div class="card empty"><div class="empty__icon">${icons.hat}</div><h3>Голосований пока нет</h3><p>Создайте первое голосование: добавьте номинации и участников, затем запустите его.</p></div>`
+          : `<div class="card empty"><div class="empty__icon">${icons.hat}</div><h3>Голосований пока нет</h3><p>Создайте первое голосование: добавьте участников с фото, затем запустите его.</p></div>`
       }
     </div>
-    ${note('info', 'Как это работает', 'Создайте голосование → проверьте номинации → запустите. Одновременно может идти только одно голосование. После завершения публикуются итоги и ключ расшифровки. Удалённое голосование исчезает с сайта вместе с реестром — после этого можно создать новое. Голосуют через вход ВКонтакте: один аккаунт — один голос в каждом голосовании.')}
+    ${note('info', 'Как это работает', 'Создайте голосование и добавьте участников → запустите. Одновременно может идти только одно голосование. Итоги видны только здесь, после завершения; их можно скачать в Excel. Удалённое голосование исчезает с сайта вместе со всеми голосами — после этого можно создать новое. Зрители голосуют через ВКонтакте: один аккаунт — один голос.')}
   `);
 
   document.getElementById('create').addEventListener('click', () => showEditor());
@@ -190,21 +215,29 @@ async function showList() {
       const e = elections.find((x) => x.id === id);
       const act = btn.dataset.act;
       if (act === 'edit') return showEditor(e);
+      if (act === 'excel') {
+        try {
+          await withLoading(btn, () => downloadExcel(e));
+        } catch (err) {
+          toast(err.message);
+        }
+        return;
+      }
       const dialogs = {
         start: {
           title: 'Запустить голосование?',
-          text: `«${e.title}» появится на сайте, и начнётся приём голосов. После запуска номинации изменить нельзя.`,
+          text: `«${e.title}» появится на сайте, и начнётся приём голосов. После запуска список участников изменить нельзя.`,
           ok: 'Запустить',
         },
         finish: {
           title: 'Завершить голосование?',
-          text: 'Приём голосов прекратится, бюллетени будут расшифрованы и подсчитаны, итоги и ключ расшифровки — опубликованы. Отменить нельзя.',
+          text: 'Приём голосов прекратится, голоса будут подсчитаны. Итоги появятся здесь, в админке. Отменить нельзя.',
           ok: 'Завершить и подвести итоги',
           danger: true,
         },
         delete: {
           title: 'Удалить голосование?',
-          text: `«${e.title}» будет удалено вместе с реестром голосов и итогами. Квитанции перестанут проверяться. Отменить нельзя.`,
+          text: `«${e.title}» будет удалено вместе со всеми голосами, итогами и фото участников. Отменить нельзя.`,
           ok: 'Удалить навсегда',
           danger: true,
         },
@@ -233,37 +266,28 @@ function toLocalInput(iso) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function candidateRow(c = {}, i = 0) {
-  return `
-    <div class="builder-c">
-      <span class="builder-c__num">${i + 1}</span>
-      <input class="input" data-f="name" placeholder="Имя участника или вариант" value="${escapeHtml(c.name ?? '')}" maxlength="120">
-      <input class="input" data-f="description" placeholder="Подпись (школа, класс) — необязательно" value="${escapeHtml(c.description ?? '')}" maxlength="300">
-      <button type="button" class="icon-btn" data-rm="c" aria-label="Удалить вариант">${icons.trash}</button>
-    </div>`;
+function photoHtml(c) {
+  return c.photo ? `<img src="${escapeHtml(c.photo)}" alt="">` : `<span>${icons.upload}<br>Фото</span>`;
 }
 
-function questionBlock(q = {}, qi = 0) {
-  const cands = q.candidates?.length ? q.candidates : [{}, {}];
+function candidateRow(c = {}, i = 0) {
   return `
-    <div class="builder-q">
-      <div class="builder-q__head">
-        <span class="eyebrow" data-qnum>Номинация ${qi + 1}</span>
-        <button type="button" class="icon-btn" data-rm="q" aria-label="Удалить номинацию">${icons.trash}</button>
+    <div class="builder-p" data-photo="${escapeHtml(c.photo ?? '')}">
+      <label class="builder-p__photo" title="Загрузить фото">
+        ${photoHtml(c)}
+        <input type="file" accept="image/*" class="sr-only" data-f="file">
+      </label>
+      <div class="builder-p__fields">
+        <span class="builder-c__num">Участник ${i + 1}</span>
+        <input class="input" data-f="name" placeholder="Имя и фамилия" value="${escapeHtml(c.name ?? '')}" maxlength="120">
+        <input class="input" data-f="description" placeholder="Подпись, например «Школа № 1, 11 «А»» — необязательно" value="${escapeHtml(c.description ?? '')}" maxlength="300">
       </div>
-      <div class="field"><input class="input" data-f="qtitle" placeholder="Название номинации, например «Выпускник года»" value="${escapeHtml(q.title ?? '')}" maxlength="120"></div>
-      <div class="field"><input class="input" data-f="qdesc" placeholder="Пояснение для голосующих — необязательно" value="${escapeHtml(q.description ?? '')}" maxlength="500"></div>
-      <span class="label top-gap-sm">Варианты</span>
-      <div data-cands>${cands.map(candidateRow).join('')}</div>
-      <button type="button" class="btn btn--ghost btn--sm top-gap-xs" data-add="c">${icons.plus} Добавить вариант</button>
+      <button type="button" class="icon-btn" data-rm="c" aria-label="Удалить участника">${icons.trash}</button>
     </div>`;
 }
 
 function renumber(form) {
-  form.querySelectorAll('.builder-q').forEach((q, qi) => {
-    q.querySelector('[data-qnum]').textContent = `Номинация ${qi + 1}`;
-    q.querySelectorAll('.builder-c__num').forEach((n, ci) => (n.textContent = ci + 1));
-  });
+  form.querySelectorAll('.builder-p .builder-c__num').forEach((n, ci) => (n.textContent = `Участник ${ci + 1}`));
 }
 
 function collect(form) {
@@ -271,21 +295,29 @@ function collect(form) {
     title: form.querySelector('#e-title').value,
     description: form.querySelector('#e-desc').value,
     endsAt: form.querySelector('#e-ends').value ? new Date(form.querySelector('#e-ends').value).toISOString() : null,
-    questions: [...form.querySelectorAll('.builder-q')].map((q) => ({
-      title: q.querySelector('[data-f="qtitle"]').value,
-      description: q.querySelector('[data-f="qdesc"]').value,
-      candidates: [...q.querySelectorAll('.builder-c')]
-        .map((c) => ({
-          name: c.querySelector('[data-f="name"]').value,
-          description: c.querySelector('[data-f="description"]').value,
-        }))
-        .filter((c) => c.name.trim() || c.description.trim()),
-    })),
+    candidates: [...form.querySelectorAll('.builder-p')]
+      .map((c) => ({
+        name: c.querySelector('[data-f="name"]').value,
+        description: c.querySelector('[data-f="description"]').value,
+        photo: c.dataset.photo || null,
+      }))
+      .filter((c) => c.name.trim() || c.description.trim() || c.photo),
   };
 }
 
+// Фото уменьшается в браузере до 800 px по большей стороне и сохраняется в JPEG.
+async function resizePhoto(file) {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, 800 / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/jpeg', 0.86);
+}
+
 function showEditor(e = null) {
-  const questions = e?.questions?.length ? e.questions : [{}];
+  const candidates = e?.questions?.[0]?.candidates?.length ? e.questions[0].candidates : [{}, {}];
   render(`
     <form class="card card--pad" id="editor" novalidate>
       <div class="election-card__head">
@@ -294,11 +326,11 @@ function showEditor(e = null) {
       </div>
       <div class="field top-gap">
         <label class="label" for="e-title">Название</label>
-        <input class="input" id="e-title" placeholder="Например: Народное голосование «Выпускник Краснообска 2026»" value="${escapeHtml(e?.title ?? '')}" maxlength="120">
+        <input class="input" id="e-title" placeholder="Например: Зрительское голосование «Выпускник Краснообска 2026»" value="${escapeHtml(e?.title ?? '')}" maxlength="120">
       </div>
       <div class="field">
         <label class="label" for="e-desc">Описание — необязательно</label>
-        <textarea class="textarea" id="e-desc" placeholder="Коротко о голосовании: кто участвует, как выбрать победителя" maxlength="1000">${escapeHtml(e?.description ?? '')}</textarea>
+        <textarea class="textarea" id="e-desc" placeholder="Пара слов для зрителей, например: «Выберите участника, который понравился вам больше всех»" maxlength="1000">${escapeHtml(e?.description ?? '')}</textarea>
       </div>
       <div class="field">
         <label class="label" for="e-ends">Автоматическое завершение — необязательно</label>
@@ -306,9 +338,10 @@ function showEditor(e = null) {
         <p class="small subtle top-gap-xs">Если не указать, голосование идёт, пока вы не завершите его вручную.</p>
       </div>
 
-      <h3 class="top-gap">Номинации</h3>
-      <div class="top-gap-sm" id="questions">${questions.map(questionBlock).join('')}</div>
-      <button type="button" class="btn btn--glass top-gap-sm" id="add-q">${icons.plus} Добавить номинацию</button>
+      <h3 class="top-gap">Участники</h3>
+      <p class="small subtle top-gap-xs">Нажмите на квадрат, чтобы загрузить фото. Лучше вертикальное, как на обложке.</p>
+      <div class="top-gap-sm" id="cands">${candidates.map(candidateRow).join('')}</div>
+      <button type="button" class="btn btn--glass top-gap-sm" id="add-c">${icons.plus} Добавить участника</button>
       <div id="editor-error"></div>
       <div class="actions">
         <button type="submit" class="btn btn--brand btn--lg">${e ? 'Сохранить изменения' : 'Создать голосование'} ${icons.arrow}</button>
@@ -316,31 +349,41 @@ function showEditor(e = null) {
     </form>`);
 
   const form = document.getElementById('editor');
-  const list = form.querySelector('#questions');
+  const list = form.querySelector('#cands');
   form.querySelector('#e-title').focus();
   form.querySelector('#cancel').addEventListener('click', () => showList());
-  form.querySelector('#add-q').addEventListener('click', () => {
-    list.insertAdjacentHTML('beforeend', questionBlock({}, list.children.length));
-    list.lastElementChild.querySelector('input').focus();
+  form.querySelector('#add-c').addEventListener('click', () => {
+    list.insertAdjacentHTML('beforeend', candidateRow({}, list.children.length));
+    list.lastElementChild.querySelector('[data-f="name"]').focus();
   });
   form.addEventListener('click', (ev) => {
-    const add = ev.target.closest('[data-add="c"]');
-    if (add) {
-      const box = add.closest('.builder-q').querySelector('[data-cands]');
-      box.insertAdjacentHTML('beforeend', candidateRow({}, box.children.length));
-      box.lastElementChild.querySelector('input').focus();
-      return;
-    }
     const rm = ev.target.closest('[data-rm]');
-    if (rm) {
-      const node = rm.closest(rm.dataset.rm === 'q' ? '.builder-q' : '.builder-c');
-      node.style.transition = 'opacity .2s, transform .2s';
-      node.style.opacity = '0';
-      node.style.transform = 'translateX(12px)';
-      setTimeout(() => {
-        node.remove();
-        renumber(form);
-      }, 200);
+    if (!rm) return;
+    const node = rm.closest('.builder-p');
+    node.style.transition = 'opacity .2s, transform .2s';
+    node.style.opacity = '0';
+    node.style.transform = 'translateX(12px)';
+    setTimeout(() => {
+      node.remove();
+      renumber(form);
+    }, 200);
+  });
+  form.addEventListener('change', async (ev) => {
+    if (ev.target.dataset.f !== 'file' || !ev.target.files[0]) return;
+    const row = ev.target.closest('.builder-p');
+    const box = row.querySelector('.builder-p__photo');
+    box.classList.add('is-loading');
+    try {
+      const data = await resizePhoto(ev.target.files[0]);
+      const { url } = await api('/api/admin/photos', { method: 'POST', body: { data } });
+      row.dataset.photo = url;
+      box.querySelector('img, span')?.remove();
+      box.insertAdjacentHTML('afterbegin', `<img src="${escapeHtml(url)}" alt="">`);
+    } catch (err) {
+      toast(err.message || 'Не удалось загрузить фото');
+    } finally {
+      box.classList.remove('is-loading');
+      ev.target.value = '';
     }
   });
   form.addEventListener('submit', async (ev) => {
