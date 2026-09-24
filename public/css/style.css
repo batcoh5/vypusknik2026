@@ -150,25 +150,6 @@ p {
   white-space: nowrap;
 }
 
-/* ---------- фоновые «сияния» ---------- */
-
-.glows {
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  overflow: hidden;
-  pointer-events: none;
-}
-.grid-bg {
-  position: absolute;
-  inset: 0;
-  background-image: linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
-  background-size: 64px 64px;
-  mask-image: radial-gradient(ellipse 70% 50% at 50% 0%, #000 30%, transparent 100%);
-  -webkit-mask-image: radial-gradient(ellipse 70% 50% at 50% 0%, #000 30%, transparent 100%);
-}
-
 /* ---------- шапка ---------- */
 
 .header {
@@ -2159,7 +2140,7 @@ fieldset.question {
 /* ---------- одностраничное голосование ---------- */
 
 .hero--compact {
-  padding: 72px 0 40px;
+  padding: 32px 0 32px;
 }
 .eyebrow--center {
   justify-content: center;
@@ -2443,9 +2424,10 @@ fieldset.question {
 }
 @media (min-width: 860px) {
   .footer__grid {
-    grid-template-columns: minmax(0, 380px) auto;
+    grid-template-columns: minmax(0, 350px) auto;
     justify-content: start;
-    column-gap: 96px;
+    align-items: center;
+    column-gap: 56px;
   }
 }
 
@@ -2495,7 +2477,7 @@ fieldset.question {
 
 .hero__logo {
   width: min(300px, 70vw);
-  margin: 8px auto 0;
+  margin: 0 auto;
   line-height: 0;
 }
 .hero__logo img {
