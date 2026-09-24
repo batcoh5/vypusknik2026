@@ -61,6 +61,7 @@ function electionCard(e) {
   const cands = e.questions.reduce((n, q) => n + q.candidates.length, 0);
   const meta = [
     `${noms} ${plural(noms, 'номинация', 'номинации', 'номинаций')} · ${cands} ${plural(cands, 'вариант', 'варианта', 'вариантов')}`,
+    e.strict ? 'Строгая защита устройства' : 'Защита по cookie',
     `Создано ${formatDate(e.createdAt)}`,
     e.startedAt && `Запущено ${formatDate(e.startedAt)}`,
     e.endsAt && e.status !== 'finished' && `Окончание ${formatDate(e.endsAt)}`,
@@ -256,6 +257,7 @@ function collect(form) {
     title: form.querySelector('#e-title').value,
     description: form.querySelector('#e-desc').value,
     endsAt: form.querySelector('#e-ends').value ? new Date(form.querySelector('#e-ends').value).toISOString() : null,
+    strict: form.querySelector('#e-strict').checked,
     questions: [...form.querySelectorAll('.builder-q')].map((q) => ({
       title: q.querySelector('[data-f="qtitle"]').value,
       description: q.querySelector('[data-f="qdesc"]').value,
@@ -289,6 +291,12 @@ function showEditor(e = null) {
         <label class="label" for="e-ends">Автоматическое завершение — необязательно</label>
         <input class="input" type="datetime-local" id="e-ends" value="${toLocalInput(e?.endsAt)}">
         <p class="small subtle top-gap-xs">Если не указать, голосование идёт, пока вы не завершите его вручную.</p>
+      </div>
+      <div class="field">
+        <label class="check">
+          <input type="checkbox" id="e-strict" ${e?.strict === false ? '' : 'checked'}>
+          <span><b>Строгая защита устройства</b> — один голос с устройства в любом браузере, в режиме инкогнито и через VPN (по отпечатку устройства). Владельцы одинаковых телефонов или ноутбуков могут получить отказ «уже проголосовали»: если будут жалобы, выключите.</span>
+        </label>
       </div>
       <h3 class="top-gap">Номинации</h3>
       <div class="top-gap-sm" id="questions">${questions.map(questionBlock).join('')}</div>

@@ -34,10 +34,13 @@ after(async () => {
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
+// Устройство голосующего: локальная метка и отпечаток (в тестах — случайные).
+const newDevice = () => ({ local: bytesToHex(randomBytes(16)), fingerprint: bytesToHex(randomBytes(32)) });
+
 // Минимальный «браузер»: хранит cookie между запросами.
 function client() {
   let cookie = '';
-  return async (method, url, body, headers = {}) => {
+  const fn = async (method, url, body, headers = {}) => {
     const res = await fetch(base + url, {
       method,
       headers: {
@@ -51,6 +54,8 @@ function client() {
     if (set) cookie = set.split(';')[0];
     return { status: res.status, data: await res.json() };
   };
+  fn.device = newDevice();
+  return fn;
 }
 
 const admin = client();
@@ -65,13 +70,13 @@ const SAMPLE = {
   ],
 };
 
-async function vote(api, electionId, choices) {
+async function vote(api, electionId, choices, device = api.device) {
   const { data } = await api('GET', `/api/elections/${electionId}`);
   const keys = await loadPublicKeys(data.election.publicKeys);
-  await api('GET', `/api/elections/${electionId}/session`);
+  await api('POST', `/api/elections/${electionId}/session`, { device });
   const token = bytesToHex(randomBytes(32));
   const { blinded, r } = await blindToken(token, keys.rsaPub);
-  const signed = await api('POST', `/api/elections/${electionId}/sign`, { blinded });
+  const signed = await api('POST', `/api/elections/${electionId}/sign`, { blinded, device });
   if (signed.status !== 200) return { signed };
   const signature = unblindSignature(signed.data.blindSignature, r, keys.rsaPub);
   const ballot = await encryptBallot(electionId, choices, keys.electionKey);
@@ -171,6 +176,11 @@ test('полный цикл: создать, запустить, проголо�
   assert.equal((await asAdmin('DELETE', `/api/admin/elections/${id}`)).status, 200);
   assert.equal((await client()('GET', '/api/current')).data.election, null);
   assert.equal((await client()('GET', `/api/receipts/${r1.cast.data.block.hash}`)).status, 404);
+  assert.equal((await client()('GET', `/api/elections/${id}`)).status, 404);
+  // От удалённого голосования на сервере не остаётся ничего: ни бюллетеней, ни выданных подписей, ни меток.
+  assert.equal(app.db.election(id), undefined);
+  assert.equal(app.db.countBlocks(id), 0);
+  assert.equal(app.db.countVoters(id), 0);
 
   const second = (await asAdmin('POST', '/api/admin/elections', SAMPLE)).data.election.id;
   await asAdmin('POST', `/api/admin/elections/${second}/start`);
@@ -182,4 +192,40 @@ test('полный цикл: создать, запустить, проголо�
   assert.equal((await asAdmin('POST', `/api/admin/elections/${third}/start`)).status, 409);
   const list = await asAdmin('GET', '/api/admin/elections');
   assert.equal(list.data.elections.length, 2);
+});
+
+test('строгая защита: другой браузер, инкогнито или VPN на том же устройстве не дают голосовать повторно', async () => {
+  const strictId = (await asAdmin('POST', '/api/admin/elections', SAMPLE)).data.election.id;
+  const list = await asAdmin('GET', '/api/admin/elections');
+  const active = list.data.elections.find((e) => e.status === 'active');
+  if (active) await asAdmin('POST', `/api/admin/elections/${active.id}/finish`);
+  await asAdmin('POST', `/api/admin/elections/${strictId}/start`);
+
+  const phone = newDevice();
+  assert.equal((await vote(client(), strictId, { q1: 'c1', q2: 'c1' }, phone)).cast.status, 200);
+
+  // Инкогнито / другой браузер: новые cookie и локальная метка, но тот же отпечаток.
+  const otherBrowser = client();
+  const again = { ...newDevice(), fingerprint: phone.fingerprint };
+  const session = await otherBrowser('POST', `/api/elections/${strictId}/session`, { device: again });
+  assert.equal(session.data.ballotIssued, true);
+  assert.equal((await vote(otherBrowser, strictId, { q1: 'c2', q2: 'c1' }, again)).signed.status, 409);
+
+  // Очищены cookie, но сохранилась локальная метка.
+  const cleared = { ...newDevice(), local: phone.local };
+  assert.equal((await vote(client(), strictId, { q1: 'c2', q2: 'c1' }, cleared)).signed.status, 409);
+
+  // Без данных об устройстве голосовать нельзя.
+  assert.equal((await client()('POST', `/api/elections/${strictId}/session`, {})).status, 400);
+
+  // Другое устройство голосует спокойно.
+  assert.equal((await vote(client(), strictId, { q1: 'c3', q2: 'c2' })).cast.status, 200);
+  await asAdmin('POST', `/api/admin/elections/${strictId}/finish`);
+
+  // С выключенной строгой защитой тот же отпечаток не мешает (например, одинаковые телефоны).
+  const softId = (await asAdmin('POST', '/api/admin/elections', { ...SAMPLE, strict: false })).data.election.id;
+  assert.equal((await asAdmin('GET', '/api/admin/elections')).data.elections.find((e) => e.id === softId).strict, false);
+  await asAdmin('POST', `/api/admin/elections/${softId}/start`);
+  assert.equal((await vote(client(), softId, { q1: 'c1', q2: 'c1' }, phone)).cast.status, 200);
+  assert.equal((await vote(client(), softId, { q1: 'c1', q2: 'c1' }, phone)).cast.status, 200);
 });

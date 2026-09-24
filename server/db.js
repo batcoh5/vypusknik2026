@@ -1,6 +1,8 @@
 // Хранилище на встроенном SQLite (node:sqlite).
 //  - elections:     голосования, их номинации и ключи комиссии;
 //  - voter_ballots: реестр избирателей — кому выдана слепая подпись (без бюллетеней);
+//  - voter_marks:   метки устройств (HMAC от cookie, локальной метки и отпечатка),
+//                   по которым выданный бюллетень узнаётся в любом браузере;
 //  - ledger_blocks: реестр бюллетеней — анонимные зашифрованные голоса (без избирателей).
 
 import { DatabaseSync } from 'node:sqlite';
@@ -35,6 +37,11 @@ export function openDb(dataDir) {
       PRIMARY KEY (election_id, identity)
     );
     CREATE INDEX IF NOT EXISTS voter_ballots_ip ON voter_ballots(election_id, ip);
+    CREATE TABLE IF NOT EXISTS voter_marks (
+      election_id TEXT NOT NULL REFERENCES elections(id) ON DELETE CASCADE,
+      mark        TEXT NOT NULL,
+      PRIMARY KEY (election_id, mark)
+    );
     CREATE TABLE IF NOT EXISTS ledger_blocks (
       election_id TEXT NOT NULL REFERENCES elections(id) ON DELETE CASCADE,
       idx         INTEGER NOT NULL,
@@ -49,6 +56,12 @@ export function openDb(dataDir) {
       UNIQUE (election_id, token)
     );
   `);
+  // Базы, созданные до появления строгой проверки устройства.
+  try {
+    db.exec('ALTER TABLE elections ADD COLUMN strict INTEGER NOT NULL DEFAULT 1');
+  } catch {
+    /* колонка уже есть */
+  }
 
   const q = {
     election: db.prepare('SELECT * FROM elections WHERE id = ?'),
@@ -56,15 +69,17 @@ export function openDb(dataDir) {
     activeElection: db.prepare("SELECT * FROM elections WHERE status = 'active' LIMIT 1"),
     lastFinished: db.prepare("SELECT * FROM elections WHERE status = 'finished' ORDER BY finished_at DESC LIMIT 1"),
     insertElection: db.prepare(
-      'INSERT INTO elections (id, title, description, questions, status, ends_at, created_at, keys) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO elections (id, title, description, questions, status, ends_at, created_at, keys, strict) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     ),
-    updateElection: db.prepare('UPDATE elections SET title = ?, description = ?, questions = ?, ends_at = ? WHERE id = ?'),
+    updateElection: db.prepare('UPDATE elections SET title = ?, description = ?, questions = ?, ends_at = ?, strict = ? WHERE id = ?'),
     startElection: db.prepare("UPDATE elections SET status = 'active', started_at = ? WHERE id = ?"),
     finishElection: db.prepare("UPDATE elections SET status = 'finished', finished_at = ?, tally = ? WHERE id = ?"),
     deleteElection: db.prepare('DELETE FROM elections WHERE id = ?'),
 
     voter: db.prepare('SELECT * FROM voter_ballots WHERE election_id = ? AND identity = ?'),
     votersByIp: db.prepare('SELECT COUNT(*) AS n FROM voter_ballots WHERE election_id = ? AND ip = ?'),
+    markExists: db.prepare('SELECT 1 FROM voter_marks WHERE election_id = ? AND mark = ?'),
+    addMark: db.prepare('INSERT OR IGNORE INTO voter_marks (election_id, mark) VALUES (?, ?)'),
     votersCount: db.prepare('SELECT COUNT(*) AS n FROM voter_ballots WHERE election_id = ?'),
     addVoter: db.prepare(
       'INSERT INTO voter_ballots (election_id, identity, ip, blinded, blind_sig, issued_at) VALUES (?, ?, ?, ?, ?, ?)',
@@ -89,6 +104,7 @@ export function openDb(dataDir) {
       questions: JSON.parse(r.questions),
       status: r.status,
       endsAt: r.ends_at,
+      strict: r.strict !== 0,
       createdAt: r.created_at,
       startedAt: r.started_at,
       finishedAt: r.finished_at,
@@ -128,8 +144,8 @@ export function openDb(dataDir) {
     activeElection: () => toElection(q.activeElection.get()),
     lastFinishedElection: () => toElection(q.lastFinished.get()),
     insertElection: (e) =>
-      q.insertElection.run(e.id, e.title, e.description, JSON.stringify(e.questions), 'draft', e.endsAt, e.createdAt, JSON.stringify(e.keys)),
-    updateElection: (id, e) => q.updateElection.run(e.title, e.description, JSON.stringify(e.questions), e.endsAt, id),
+      q.insertElection.run(e.id, e.title, e.description, JSON.stringify(e.questions), 'draft', e.endsAt, e.createdAt, JSON.stringify(e.keys), e.strict ? 1 : 0),
+    updateElection: (id, e) => q.updateElection.run(e.title, e.description, JSON.stringify(e.questions), e.endsAt, e.strict ? 1 : 0, id),
     startElection: (id, at) => q.startElection.run(at, id),
     finishElection: (id, at, tally) => q.finishElection.run(at, JSON.stringify(tally), id),
     deleteElection: (id) => q.deleteElection.run(id),
@@ -137,6 +153,8 @@ export function openDb(dataDir) {
     getVoter: (eid, identity) => q.voter.get(eid, identity),
     countVotersByIp: (eid, ip) => q.votersByIp.get(eid, ip).n,
     countVoters: (eid) => q.votersCount.get(eid).n,
+    anyMark: (eid, marks) => marks.some((m) => q.markExists.get(eid, m)),
+    addMarks: (eid, marks) => marks.forEach((m) => q.addMark.run(eid, m)),
     addVoter: (eid, v) => q.addVoter.run(eid, v.identity, v.ip, v.blinded, v.blindSig, v.issuedAt),
 
     lastBlock: (eid) => toBlock(q.lastBlock.get(eid)),

@@ -26,6 +26,7 @@ import {
   computeBlockHash,
   verifyLedgerSignature,
 } from './core.js';
+import { deviceInfo } from './device.js';
 
 renderChrome();
 
@@ -236,7 +237,8 @@ async function stepSend(resume = null) {
 
     if (!pending.signature) {
       const signature = await run('sign', async () => {
-        const res = await api(`/api/elections/${election.id}/sign`, { method: 'POST', body: { blinded: pending.blinded } });
+        const device = await deviceInfo();
+        const res = await api(`/api/elections/${election.id}/sign`, { method: 'POST', body: { blinded: pending.blinded, device } });
         const sig = unblindSignature(res.blindSignature, pending.r, keys.rsaPub);
         if (!(await verifyTokenSignature(pending.token, sig, keys.rsaPub))) throw new Error('Подпись комиссии не прошла проверку');
         return sig;
@@ -347,7 +349,7 @@ async function main() {
   document.getElementById('vote-status').textContent = 'Электронный бюллетень';
   document.getElementById('vote-title').textContent = election.title;
   keys = await loadPublicKeys(election.publicKeys);
-  const session = await api(`/api/elections/${election.id}/session`);
+  const session = await api(`/api/elections/${election.id}/session`, { method: 'POST', body: { device: await deviceInfo() } });
   const receipt = store.get(receiptKey(election.id));
   const pending = store.get(pendingKey(election.id));
 
@@ -368,8 +370,8 @@ async function main() {
   if (session.ballotIssued) {
     return showMessage(
       'warning',
-      'Бюллетень уже выдан',
-      'На этом устройстве бюллетень в этом голосовании уже был получен. Проголосовать можно только один раз.',
+      'Вы уже проголосовали',
+      'С этого устройства уже проголосовали в этом голосовании. Проголосовать можно только один раз — в любом браузере, в режиме инкогнито и через VPN.',
       `<a class="btn btn--primary" href="/verify">Проверить голос</a><a class="btn btn--glass" href="/ledger">Открыть реестр</a>`,
     );
   }

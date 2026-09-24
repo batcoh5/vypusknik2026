@@ -179,6 +179,7 @@ export function renderChrome() {
 
   initReveal();
   initSpotlight();
+  pruneDeletedElections();
 }
 
 // ---------- анимации ----------
@@ -444,6 +445,32 @@ export const store = {
     }
   },
 };
+
+// Квитанции и неотправленные бюллетени удалённых голосований стираются из браузера.
+let pruning;
+export function pruneDeletedElections() {
+  pruning ??= (async () => {
+    const ids = new Set();
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const m = localStorage.key(i)?.match(/^vyp26:(?:receipt|pending):(e[0-9a-f]+)$/);
+        if (m) ids.add(m[1]);
+      }
+    } catch {
+      return;
+    }
+    await Promise.all(
+      [...ids].map(async (id) => {
+        const res = await fetch(`/api/elections/${id}`).catch(() => null);
+        if (res?.status === 404) {
+          store.remove(receiptKey(id));
+          store.remove(pendingKey(id));
+        }
+      }),
+    );
+  })();
+  return pruning;
+}
 
 export const receiptKey = (electionId) => `receipt:${electionId}`;
 export const pendingKey = (electionId) => `pending:${electionId}`;

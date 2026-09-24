@@ -10,6 +10,7 @@ import {
   shake,
   withLoading,
   initials,
+  pruneDeletedElections,
 } from './common.js';
 import {
   loadPublicKeys,
@@ -177,6 +178,7 @@ document.getElementById('receipt-file').addEventListener('change', async (e) => 
   }
 });
 
+await pruneDeletedElections();
 const saved = savedReceipts();
 if (saved.length) {
   const box = document.getElementById('saved');

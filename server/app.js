@@ -112,6 +112,7 @@ export function normalizeElectionInput(body) {
     title,
     description,
     endsAt,
+    strict: body.strict !== false,
     questions: questions.map((q, qi) => {
       const qTitle = text(q?.title, `Номинация ${qi + 1}`, { min: 1, max: 120 });
       const candidates = Array.isArray(q?.candidates) ? q.candidates : [];
@@ -191,6 +192,7 @@ export async function createApp(options = {}) {
       questions: e.questions,
       status: e.status,
       endsAt: e.endsAt,
+      strict: e.strict,
       startedAt: e.startedAt,
       finishedAt: e.finishedAt,
       publicKeys: c.public,
@@ -208,6 +210,7 @@ export async function createApp(options = {}) {
       questions: e.questions,
       status: e.status,
       endsAt: e.endsAt,
+      strict: e.strict,
       createdAt: e.createdAt,
       startedAt: e.startedAt,
       finishedAt: e.finishedAt,
@@ -227,6 +230,22 @@ export async function createApp(options = {}) {
     const e = publicElectionById(id);
     if (e.status !== 'active') throw new HttpError(403, 'not_active', 'Приём голосов в этом голосовании завершён');
     return e;
+  }
+
+  // Метки, по которым узнаётся уже проголосовавшее устройство. В строгом режиме
+  // кроме cookie учитываются локальная метка браузера и отпечаток устройства,
+  // одинаковый в любом браузере, в инкогнито и через VPN. Хранятся только HMAC.
+  function deviceMarks(e, identityKey, device) {
+    const marks = [`id:${identityKey}`];
+    if (e.strict) {
+      const local = String(device?.local ?? '');
+      const fingerprint = String(device?.fingerprint ?? '');
+      if (!/^[0-9a-f]{32}$/.test(local) || !/^[0-9a-f]{64}$/.test(fingerprint)) {
+        throw new HttpError(400, 'no_device', 'Не удалось проверить устройство. Обновите страницу');
+      }
+      marks.push(`local:${local}`, `fp:${fingerprint}`);
+    }
+    return marks.map((m) => secret.hmac(`mark:${e.id}:${m}`));
   }
 
   function clientIp(req) {
@@ -267,11 +286,15 @@ export async function createApp(options = {}) {
     serverTime: now().toISOString(),
   }));
 
-  route('GET', '/api/elections/:id/session', async ({ req, res, params }) => {
+  route('POST', '/api/elections/:id/session', async ({ req, res, body, params }) => {
     const e = publicElectionById(params.id);
     identity.ensure(req, res);
-    const voter = db.getVoter(e.id, identity.identify(req) ?? '');
-    return { status: e.status, ballotIssued: Boolean(voter), blinded: voter?.blinded ?? null };
+    const id = identity.identify(req);
+    const voter = id ? db.getVoter(e.id, id) : null;
+    // Новая cookie ещё не дошла до браузера — метку по ней проверять нечем, смотрим остальные.
+    const marks = deviceMarks(e, id ?? 'new', body.device);
+    const issued = Boolean(voter) || db.anyMark(e.id, marks);
+    return { status: e.status, ballotIssued: issued, blinded: voter?.blinded ?? null };
   });
 
   // Шаг 1: избиратель получает слепую подпись на свой анонимный токен.
@@ -285,12 +308,16 @@ export async function createApp(options = {}) {
       throw new HttpError(400, 'bad_request', 'Некорректный запрос');
     }
     const ip = secret.hmac('ip:' + clientIp(req));
+    const marks = deviceMarks(e, id, body.device);
     return db.transaction(() => {
       const voter = db.getVoter(e.id, id);
       if (voter) {
         // Повтор того же запроса (например, оборвалась связь) — отдаём ту же подпись.
         if (voter.blinded === blinded) return { blindSignature: voter.blind_sig };
-        throw new HttpError(409, 'already_issued', 'Вы уже получили бюллетень в этом голосовании');
+        throw new HttpError(409, 'already_issued', 'С этого устройства уже проголосовали в этом голосовании');
+      }
+      if (db.anyMark(e.id, marks)) {
+        throw new HttpError(409, 'already_issued', 'С этого устройства уже проголосовали в этом голосовании');
       }
       if (maxPerIp > 0 && db.countVotersByIp(e.id, ip) >= maxPerIp) {
         throw new HttpError(429, 'ip_limit', 'Превышено число бюллетеней для вашей сети');
@@ -302,6 +329,7 @@ export async function createApp(options = {}) {
         throw new HttpError(400, 'bad_request', 'Некорректный запрос');
       }
       db.addVoter(e.id, { identity: id, ip, blinded, blindSig: blindSignature, issuedAt: now().toISOString() });
+      db.addMarks(e.id, marks);
       return { blindSignature };
     });
   });
