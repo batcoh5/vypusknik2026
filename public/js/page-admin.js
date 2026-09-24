@@ -112,7 +112,7 @@ function electionCard(e) {
     <div class="card card--hover spot" data-id="${e.id}">
       <div class="election-card__head">
         <div>
-          <h3>${escapeHtml(e.title)}</h3>
+          <h3>Голосование от ${escapeHtml(formatDate(e.createdAt))}</h3>
           ${e.description ? `<p class="small muted top-gap-xs">${escapeHtml(e.description)}</p>` : ''}
         </div>
         ${statusBadge(e.status)}
@@ -131,7 +131,7 @@ function simulateDialog(e) {
       <div class="modal" role="dialog" aria-modal="true">
         <form class="modal__box modal__box--wide" novalidate>
           <h3>Симуляция голосов</h3>
-          <p>Тестовые голоса добавятся в «${escapeHtml(e.title)}» и попадут в итоги и Excel.</p>
+          <p>Тестовые голоса добавятся в это голосование и попадут в итоги и Excel.</p>
           <div class="seg top-gap-sm">
             <label><input type="radio" name="mode" value="random" checked><span>Случайно</span></label>
             <label><input type="radio" name="mode" value="manual"><span>Вручную</span></label>
@@ -187,7 +187,7 @@ async function downloadExcel(e) {
   if (!res.ok) throw new Error((await res.json().catch(() => null))?.message ?? 'Не удалось скачать файл');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(await res.blob());
-  a.download = `Итоги — ${e.title}.xlsx`.replace(/[\\/:*?"<>|]/g, '');
+  a.download = 'Итоги зрительского голосования.xlsx';
   document.body.append(a);
   a.click();
   a.remove();
@@ -196,9 +196,9 @@ async function downloadExcel(e) {
 
 // Что сейчас видят посетители сайта.
 function siteState(elections, active) {
-  if (active) return `Сейчас идёт: «${escapeHtml(active.title)}»`;
+  if (active) return 'Сейчас идёт голосование.';
   const finished = elections.filter((e) => e.status === 'finished').sort((a, b) => b.finishedAt.localeCompare(a.finishedAt))[0];
-  if (finished) return `На сайте написано, что «${escapeHtml(finished.title)}» завершено. Удалите его, чтобы посетители видели «Голосование скоро начнётся».`;
+  if (finished) return `На сайте написано, что голосование завершено. Удалите его, чтобы посетители видели «Голосование скоро начнётся».`;
   return 'Сейчас голосования нет — посетители видят «Голосование скоро начнётся».';
 }
 
@@ -304,7 +304,7 @@ async function showList() {
       const dialogs = {
         start: {
           title: 'Запустить голосование?',
-          text: `«${e.title}» появится на сайте, и начнётся приём голосов. После запуска список участников изменить нельзя.`,
+          text: `Участники появятся на сайте, и начнётся приём голосов. После запуска список участников изменить нельзя.`,
           ok: 'Запустить',
         },
         finish: {
@@ -315,7 +315,7 @@ async function showList() {
         },
         delete: {
           title: 'Удалить голосование?',
-          text: `«${e.title}» будет удалено вместе со всеми голосами, итогами и фото участников. Отменить нельзя.`,
+          text: `Голосование будет удалено вместе со всеми голосами, итогами и фото участников. Отменить нельзя.`,
           ok: 'Удалить навсегда',
           danger: true,
         },
@@ -370,7 +370,6 @@ function renumber(form) {
 
 function collect(form) {
   return {
-    title: form.querySelector('#e-title').value,
     description: form.querySelector('#e-desc').value,
     endsAt: form.querySelector('#e-ends').value ? new Date(form.querySelector('#e-ends').value).toISOString() : null,
     candidates: [...form.querySelectorAll('.builder-p')]
@@ -403,10 +402,6 @@ function showEditor(e = null) {
         <button type="button" class="btn btn--ghost" id="cancel">Отмена</button>
       </div>
       <div class="field top-gap">
-        <label class="label" for="e-title">Название</label>
-        <input class="input" id="e-title" placeholder="Например: Зрительское голосование «Выпускник Краснообска 2026»" value="${escapeHtml(e?.title ?? '')}" maxlength="120">
-      </div>
-      <div class="field">
         <label class="label" for="e-desc">Описание — необязательно</label>
         <textarea class="textarea" id="e-desc" placeholder="Пара слов для зрителей, например: «Выберите участника, который понравился вам больше всех»" maxlength="1000">${escapeHtml(e?.description ?? '')}</textarea>
       </div>
@@ -428,7 +423,7 @@ function showEditor(e = null) {
 
   const form = document.getElementById('editor');
   const list = form.querySelector('#cands');
-  form.querySelector('#e-title').focus();
+  form.querySelector('[data-f="name"]').focus();
   form.querySelector('#cancel').addEventListener('click', () => showList());
   form.querySelector('#add-c').addEventListener('click', () => {
     list.insertAdjacentHTML('beforeend', candidateRow({}, list.children.length));

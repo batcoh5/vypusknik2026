@@ -54,12 +54,8 @@ const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matche
 // ---------- шапка, подвал, фон ----------
 
 function brandHtml() {
-  return `<a class="brand" href="/" aria-label="Выпускник Краснообска — на главную">
-    <img class="brand__mark" src="/img/logo.jpg" alt="" width="32" height="32">
-    <svg class="brand__word" viewBox="0 0 124 30" role="img" aria-label="Выпускник Краснообска 2026">
-      <text class="brand__name" x="0" y="13" textLength="124" lengthAdjust="spacingAndGlyphs">ВЫПУСКНИК</text>
-      <text class="brand__sub" x="0.5" y="27.5" textLength="123" lengthAdjust="spacing">КРАСНООБСКА 2026</text>
-    </svg>
+  return `<a class="brand brand--footer" href="/" aria-label="Выпускник Краснообска 2026 — на главную">
+    <img class="brand__logo" src="/img/wordmark.png" alt="Выпускник Краснообска 2026" width="150" height="46">
   </a>`;
 }
 
@@ -92,26 +88,9 @@ export function renderChrome() {
             <span class="hint__tip" role="tooltip">Зрители сами выбирают участника, который понравился им больше всех. Голосовать может каждый — один раз через свой аккаунт ВКонтакте. Голоса зрителей переводятся в баллы (до 160) и учитываются в итогах конкурса.</span>
           </span>
         </div>
-        <svg class="footer__word" viewBox="0 0 1000 130" aria-hidden="true" preserveAspectRatio="xMidYMax meet">
-          <defs><linearGradient id="fw" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".14"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient></defs>
-          <text x="500" y="126" text-anchor="middle" textLength="990" lengthAdjust="spacingAndGlyphs" fill="url(#fw)">ВЫПУСКНИК</text>
-        </svg>
       </div>
     </footer>`);
   document.body.append(footer);
-
-  // «ВЫПУСКНИК» в подвале выезжает снизу, когда подвал появляется на экране.
-  const word = footer.querySelector('.footer__word');
-  if (reduceMotion() || !('IntersectionObserver' in window)) word.classList.add('in');
-  else {
-    const io = new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting)) {
-        word.classList.add('in');
-        io.disconnect();
-      }
-    });
-    io.observe(footer);
-  }
 
   const hint = footer.querySelector('.hint');
   hint.querySelector('.hint__btn').addEventListener('click', (e) => {

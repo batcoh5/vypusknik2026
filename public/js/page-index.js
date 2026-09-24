@@ -39,6 +39,7 @@ function setLead(html) {
   const lead = document.getElementById('hero-lead');
   lead.classList.remove('lead-sk');
   lead.innerHTML = html;
+  lead.hidden = !html;
 }
 
 function render(html) {
@@ -216,7 +217,7 @@ async function main() {
   }
 
   election = current;
-  setLead(`<b class="grad-text">${escapeHtml(election.title)}</b>${election.description ? `<br>${escapeHtml(election.description)}` : ''}`);
+  setLead(election.description ? escapeHtml(election.description) : '');
 
   if (election.status === 'finished') {
     return showMessage(icons.check, 'Голосование завершено', 'Спасибо всем, кто голосовал!', vkButton);

@@ -2655,3 +2655,20 @@ fieldset.question {
   width: 26px;
   height: 26px;
 }
+
+/* ---------- логотип в подвале — серый ---------- */
+
+.brand__logo {
+  display: block;
+  width: 150px;
+  height: auto;
+  filter: grayscale(1);
+  opacity: 0.5;
+  transition: opacity 0.2s;
+}
+.brand--footer:hover .brand__logo {
+  opacity: 0.8;
+}
+.hero__lead[hidden] {
+  display: none;
+}
