@@ -60,10 +60,6 @@ function brandHtml() {
 }
 
 export function renderChrome() {
-  document.body.prepend(
-    el(`<div class="glows" aria-hidden="true"><div class="grid-bg"></div></div>`),
-  );
-
   const footer = el(`
     <footer class="footer">
       <div class="container">
