@@ -55,11 +55,7 @@ const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matche
 
 function brandHtml() {
   return `<a class="brand" href="/" aria-label="Выпускник Краснообска — на главную">
-    <img class="brand__mark" src="/img/logo.jpg" alt="" width="32" height="32">
-    <svg class="brand__word" viewBox="0 0 124 30" role="img" aria-label="Выпускник Краснообска 2026">
-      <text class="brand__name" x="0" y="13" textLength="124" lengthAdjust="spacingAndGlyphs">ВЫПУСКНИК</text>
-      <text class="brand__sub" x="0.5" y="27.5" textLength="123" lengthAdjust="spacing">КРАСНООБСКА 2026</text>
-    </svg>
+    <img class="brand__logo" src="/img/wordmark.png" alt="Выпускник Краснообска 2026" width="1210" height="374">
   </a>`;
 }
 
@@ -95,10 +91,7 @@ export function renderChrome() {
           <span>© ${new Date().getFullYear()} «Выпускник Краснообска». Все права защищены.</span>
           <span>Зрительское голосование</span>
         </div>
-        <svg class="footer__word" viewBox="0 0 1000 130" aria-hidden="true" preserveAspectRatio="xMidYMax meet">
-          <defs><linearGradient id="fw" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".14"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient></defs>
-          <text x="500" y="126" text-anchor="middle" textLength="990" lengthAdjust="spacingAndGlyphs" fill="url(#fw)">ВЫПУСКНИК</text>
-        </svg>
+        <img class="footer__word footer__logo" src="/img/wordmark.png" alt="" aria-hidden="true" width="1210" height="374">
       </div>
     </footer>`);
   document.body.append(footer);
