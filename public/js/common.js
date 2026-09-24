@@ -91,7 +91,10 @@ export function renderChrome() {
           <span>© ${new Date().getFullYear()} «Выпускник Краснообска». Все права защищены.</span>
           <span>Зрительское голосование</span>
         </div>
-        <img class="footer__word footer__logo" src="/img/wordmark.png" alt="" aria-hidden="true" width="150" height="46">
+        <svg class="footer__word" viewBox="0 0 1000 130" aria-hidden="true" preserveAspectRatio="xMidYMax meet">
+          <defs><linearGradient id="fw" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".14"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient></defs>
+          <text x="500" y="126" text-anchor="middle" textLength="990" lengthAdjust="spacingAndGlyphs" fill="url(#fw)">ВЫПУСКНИК</text>
+        </svg>
       </div>
     </footer>`);
   document.body.append(footer);
