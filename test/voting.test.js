@@ -31,6 +31,7 @@ before(async () => {
     vkClientId: '51234567',
     publicUrl: 'https://vote.example',
     fetch: fakeVk,
+    devTools: true,
   });
   await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${app.server.address().port}`;
@@ -332,4 +333,43 @@ test('фото участников и итоги в Excel', async () => {
   // Удаление голосования удаляет и фото.
   await asAdmin('DELETE', `/api/admin/elections/${id}`);
   assert.equal((await fetch(base + up.data.url)).status, 404);
+});
+
+test('симуляция голосов (DEV_TOOLS): случайно и вручную', async () => {
+  const active = (await asAdmin('GET', '/api/admin/elections')).data.elections.find((e) => e.status === 'active');
+  if (active) await asAdmin('POST', `/api/admin/elections/${active.id}/finish`);
+  const id = (await asAdmin('POST', '/api/admin/elections', SAMPLE)).data.election.id;
+  // Только для идущего голосования и только админу.
+  assert.equal((await asAdmin('POST', `/api/admin/elections/${id}/simulate`, { mode: 'random', count: 5 })).status, 404);
+  await asAdmin('POST', `/api/admin/elections/${id}/start`);
+  assert.equal((await client()('POST', `/api/admin/elections/${id}/simulate`, { mode: 'random', count: 5 })).status, 401);
+  assert.equal((await asAdmin('POST', `/api/admin/elections/${id}/simulate`, { mode: 'random', count: 0 })).status, 400);
+
+  const manual = await asAdmin('POST', `/api/admin/elections/${id}/simulate`, { mode: 'manual', counts: { c1: 7, c2: 3, c3: 0 } });
+  assert.equal(manual.data.added, 10);
+  const random = await asAdmin('POST', `/api/admin/elections/${id}/simulate`, { mode: 'random', count: 25 });
+  assert.equal(random.data.added, 25);
+  assert.equal(random.data.election.stats.simulated, 35);
+  // Настоящий голос тоже проходит.
+  assert.equal((await vote(await voter(), id, { q1: 'c3' })).cast.status, 200);
+
+  const tally = (await asAdmin('POST', `/api/admin/elections/${id}/finish`)).data.election.tally;
+  assert.equal(tally.valid, 36);
+  assert.equal(tally.spoiled, 0);
+  assert.ok(tally.counts.q1.c1 >= 7 && tally.counts.q1.c2 >= 3 && tally.counts.q1.c3 >= 1);
+  assert.equal(tally.counts.q1.c1 + tally.counts.q1.c2 + tally.counts.q1.c3, 36);
+});
+
+test('без DEV_TOOLS симуляция выключена', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vyp-'));
+  const plain = await createApp({ dataDir: dir, adminToken: ADMIN });
+  await new Promise((r) => plain.server.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${plain.server.address().port}`;
+  const H = { authorization: `Bearer ${ADMIN}`, 'content-type': 'application/json' };
+  const id = (await (await fetch(`${url}/api/admin/elections`, { method: 'POST', headers: H, body: JSON.stringify(SAMPLE) })).json()).election.id;
+  await fetch(`${url}/api/admin/elections/${id}/start`, { method: 'POST', headers: H });
+  const res = await fetch(`${url}/api/admin/elections/${id}/simulate`, { method: 'POST', headers: H, body: JSON.stringify({ mode: 'random', count: 5 }) });
+  assert.equal(res.status, 403);
+  await new Promise((r) => plain.server.close(r));
+  fs.rmSync(dir, { recursive: true, force: true });
 });
