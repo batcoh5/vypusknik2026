@@ -615,10 +615,18 @@ export async function createApp(options = {}) {
     }
     if (!stat.isFile()) return false;
     const type = MIME[path.extname(file)] ?? 'application/octet-stream';
+    // Браузер каждый раз сверяется с сервером (ETag), поэтому после деплоя сразу получает новые стили и скрипты.
+    const etag = `"${stat.size.toString(36)}-${Math.floor(stat.mtimeMs).toString(36)}"`;
+    const cache = { 'Cache-Control': 'no-cache', ETag: etag };
+    if (req.headers['if-none-match'] === etag) {
+      res.writeHead(304, { ...cache, ...SECURITY_HEADERS });
+      res.end();
+      return true;
+    }
     res.writeHead(200, {
       'Content-Type': type,
       'Content-Length': stat.size,
-      'Cache-Control': type.startsWith('text/html') ? 'no-cache' : 'public, max-age=300',
+      ...cache,
       ...SECURITY_HEADERS,
     });
     if (req.method === 'HEAD') res.end();
