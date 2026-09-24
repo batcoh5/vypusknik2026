@@ -317,16 +317,19 @@ test('фото участников и итоги в Excel', async () => {
   assert.equal(created.data.election.questions[0].candidates[0].photo, up.data.url);
   const id = created.data.election.id;
   await asAdmin('POST', `/api/admin/elections/${id}/start`);
-  for (const c of ['c1', 'c1', 'c1', 'c2']) assert.equal((await vote(await voter(), id, { q1: c })).cast.status, 200);
+  for (const c of ['c2', 'c2', 'c2', 'c1']) assert.equal((await vote(await voter(), id, { q1: c })).cast.status, 200);
   await asAdmin('POST', `/api/admin/elections/${id}/finish`);
 
   const res = await fetch(`${base}/api/admin/elections/${id}/results.xlsx`, { headers: { authorization: `Bearer ${ADMIN}` } });
   assert.equal(res.status, 200);
   const file = path.join(dataDir, 'results.xlsx');
   fs.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
-  // Распаковываем лист и проверяем формулу «голоса / всего × 160».
+  // Распаковываем лист и проверяем формулу «голоса / всего × 160» с округлением.
   const sheet = execFileSync('python3', ['-c', `import zipfile,sys;print(zipfile.ZipFile(sys.argv[1]).read('xl/worksheets/sheet1.xml').decode())`, file]).toString();
-  assert.match(sheet, /<f>IF\(\$C\$7=0,0,C4\/\$C\$7\*160\)<\/f><v>120<\/v>/);
+  assert.match(sheet, /<f>IF\(\$C\$7=0,0,ROUND\(C4\/\$C\$7\*160,0\)\)<\/f><v>120<\/v>/);
+  // Победитель — второй участник: в строке остаётся его номер 2, а не место 1.
+  assert.match(sheet, /<c r="A4"><v>2<\/v><\/c>/);
+  assert.match(sheet, /<c r="A5"><v>1<\/v><\/c>/);
   assert.match(sheet, /<f>SUM\(C4:C6\)<\/f><v>4<\/v>/);
   assert.match(sheet, /Анна/);
 

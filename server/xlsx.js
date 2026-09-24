@@ -1,5 +1,5 @@
 // Итоги голосования в Excel (.xlsx) без внешних библиотек.
-// Баллы считаются формулой Excel: голоса участника / всего голосов × 160.
+// Баллы считаются формулой Excel: голоса участника / всего голосов × 160, с округлением до целого.
 
 import zlib from 'node:zlib';
 
@@ -86,12 +86,13 @@ const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
  * @returns {Buffer}
  */
 export function resultsXlsx({ title, finishedAt, candidates }) {
-  const list = [...candidates].sort((a, b) => b.votes - a.votes);
+  // № — номер участника в голосовании (порядок ввода), не место.
+  const list = candidates.map((c, i) => ({ ...c, num: i + 1 })).sort((a, b) => b.votes - a.votes || a.num - b.num);
   const total = list.reduce((s, c) => s + c.votes, 0);
   const first = 4;
   const last = first + list.length - 1;
   const totalRow = last + 1;
-  const points = (v) => (total ? (v / total) * 160 : 0);
+  const points = (v) => (total ? Math.round((v / total) * 160) : 0);
 
   const rows = [
     row(1, [str('A1', title, 5)]),
@@ -100,16 +101,16 @@ export function resultsXlsx({ title, finishedAt, candidates }) {
     ...list.map((c, i) => {
       const r = first + i;
       return row(r, [
-        num(`A${r}`, i + 1),
+        num(`A${r}`, c.num),
         str(`B${r}`, c.name),
         num(`C${r}`, c.votes),
-        fml(`D${r}`, `IF($C$${totalRow}=0,0,C${r}/$C$${totalRow}*160)`, points(c.votes), 2),
+        fml(`D${r}`, `IF($C$${totalRow}=0,0,ROUND(C${r}/$C$${totalRow}*160,0))`, points(c.votes)),
       ]);
     }),
     row(totalRow, [
       str(`B${totalRow}`, 'Всего голосов', 1),
       fml(`C${totalRow}`, `SUM(C${first}:C${last})`, total, 1),
-      fml(`D${totalRow}`, `SUM(D${first}:D${last})`, total ? 160 : 0, 3),
+      fml(`D${totalRow}`, `SUM(D${first}:D${last})`, list.reduce((n, c) => n + points(c.votes), 0), 1),
     ]),
   ];
 
