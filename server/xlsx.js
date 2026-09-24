@@ -86,8 +86,8 @@ const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
  * @returns {Buffer}
  */
 export function resultsXlsx({ title, finishedAt, candidates }) {
-  // № — номер участника в голосовании (порядок ввода), не место.
-  const list = candidates.map((c, i) => ({ ...c, num: i + 1 })).sort((a, b) => b.votes - a.votes || a.num - b.num);
+  // Участники в порядке голосования, № — их номер в голосовании (как в протоколе). Без сортировки по голосам.
+  const list = candidates.map((c, i) => ({ ...c, num: i + 1 }));
   const total = list.reduce((s, c) => s + c.votes, 0);
   const first = 4;
   const last = first + list.length - 1;

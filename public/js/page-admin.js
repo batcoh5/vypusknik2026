@@ -64,11 +64,11 @@ function resultsTable(e) {
   const q = e.questions[0];
   const counts = e.tally.counts[q.id];
   const total = q.candidates.reduce((n, c) => n + (counts[c.id] ?? 0), 0);
-  // № — порядковый номер участника в голосовании, он не зависит от места.
+  // Участники в том же порядке и с теми же номерами, что в голосовании (как в протоколе), без сортировки.
   const rows = q.candidates
-    .map((c, i) => ({ c, num: i + 1, v: counts[c.id] ?? 0 }))
-    .sort((a, b) => b.v - a.v || a.num - b.num)
-    .map(({ c, num, v }) => {
+    .map((c, i) => {
+      const num = i + 1;
+      const v = counts[c.id] ?? 0;
       const points = total ? Math.round((v / total) * 160) : 0;
       return `<tr><td>${num}</td><td>${escapeHtml(c.name)}</td><td class="num">${formatNumber(v)}</td><td class="num">${points}</td></tr>`;
     })
