@@ -12,6 +12,7 @@ import {
   withLoading,
   confirmDialog,
   api as baseApi,
+  el,
 } from './common.js';
 
 renderChrome();
@@ -23,6 +24,8 @@ try {
 } catch {
   /* ignore */
 }
+
+let devTools = false;
 
 const api = (path, opts = {}) => baseApi(path, { ...opts, headers: { Authorization: `Bearer ${token}` } });
 
@@ -87,7 +90,7 @@ function electionCard(e) {
     e.startedAt && `Запущено ${formatDate(e.startedAt)}`,
     e.endsAt && e.status !== 'finished' && `Окончание ${formatDate(e.endsAt)}`,
     e.finishedAt && `Завершено ${formatDate(e.finishedAt)}`,
-    e.status !== 'draft' && `Проголосовало: <b>${formatNumber(e.stats.ballotsCast)}</b>`,
+    e.status !== 'draft' && `Проголосовало: <b>${formatNumber(e.stats.ballotsCast)}</b>${e.stats.simulated ? ` <span class="badge badge--draft">из них тестовых: ${formatNumber(e.stats.simulated)}</span>` : ''}`,
   ].filter(Boolean);
 
   const actions = {
@@ -97,6 +100,7 @@ function electionCard(e) {
       <button class="btn btn--danger btn--sm" data-act="delete">${icons.trash} Удалить</button>`,
     active: `
       <button class="btn btn--primary btn--sm" data-act="finish">${icons.stop} Завершить и подвести итоги</button>
+      ${devTools ? `<button class="btn btn--glass btn--sm" data-act="simulate">${icons.chart} Симуляция голосов</button>` : ''}
       <a class="btn btn--glass btn--sm" href="/" target="_blank">Открыть сайт ${icons.external}</a>`,
     finished: `
       <button class="btn btn--brand btn--sm" data-act="excel">${icons.download} Скачать итоги в Excel</button>
@@ -116,6 +120,64 @@ function electionCard(e) {
       ${e.tally ? resultsTable(e) : ''}
       <div class="actions">${actions}</div>
     </div>`;
+}
+
+// ВРЕМЕННО: окно симуляции голосов — случайно или заданное число каждому участнику.
+function simulateDialog(e) {
+  const cands = e.questions[0].candidates;
+  return new Promise((resolve) => {
+    const modal = el(`
+      <div class="modal" role="dialog" aria-modal="true">
+        <form class="modal__box modal__box--wide" novalidate>
+          <h3>Симуляция голосов</h3>
+          <p>Тестовые голоса добавятся в «${escapeHtml(e.title)}» и попадут в итоги и Excel.</p>
+          <div class="seg top-gap-sm">
+            <label><input type="radio" name="mode" value="random" checked><span>Случайно</span></label>
+            <label><input type="radio" name="mode" value="manual"><span>Вручную</span></label>
+          </div>
+          <div class="sim-random top-gap-sm">
+            <label class="label" for="sim-count">Сколько голосов добавить</label>
+            <input class="input" id="sim-count" type="number" min="1" max="5000" value="100">
+          </div>
+          <div class="sim-manual top-gap-sm hidden">
+            ${cands
+              .map(
+                (c) => `<label class="sim-row"><span>${escapeHtml(c.name)}</span><input class="input" type="number" min="0" max="5000" value="0" data-c="${escapeHtml(c.id)}"></label>`,
+              )
+              .join('')}
+          </div>
+          <div class="actions">
+            <button class="btn btn--brand" type="submit">Добавить голоса</button>
+            <button class="btn btn--ghost" type="button" data-cancel>Отмена</button>
+          </div>
+        </form>
+      </div>`);
+    const form = modal.querySelector('form');
+    const close = (value) => {
+      modal.classList.add('closing');
+      setTimeout(() => modal.remove(), 200);
+      resolve(value);
+    };
+    form.addEventListener('change', () => {
+      const manual = form.mode.value === 'manual';
+      form.querySelector('.sim-random').classList.toggle('hidden', manual);
+      form.querySelector('.sim-manual').classList.toggle('hidden', !manual);
+    });
+    modal.addEventListener('click', (ev) => {
+      if (ev.target === modal || ev.target.closest('[data-cancel]')) close(null);
+    });
+    form.addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      if (form.mode.value === 'manual') {
+        const counts = Object.fromEntries([...form.querySelectorAll('[data-c]')].map((i) => [i.dataset.c, Number(i.value) || 0]));
+        close({ mode: 'manual', counts });
+      } else {
+        close({ mode: 'random', count: Number(form.querySelector('#sim-count').value) || 0 });
+      }
+    });
+    document.body.append(modal);
+    form.querySelector('#sim-count').focus();
+  });
 }
 
 // Скачивание .xlsx с итогами (запрос с ключом администратора).
@@ -160,6 +222,7 @@ async function showList() {
     /* ignore */
   }
   const { elections } = data;
+  devTools = Boolean(data.devTools);
   const warnings = [
     data.storageWarning &&
       note(
@@ -167,6 +230,8 @@ async function showList() {
         'Данные пропадут при следующем обновлении сайта',
         'На Railway не подключено постоянное хранилище. Откройте сервис → Settings → Volumes → New Volume (путь /data) и удалите переменную DATA_DIR, если она указывает в другое место. До этого голосования и голоса стираются при каждом деплое.',
       ),
+    data.devTools &&
+      note('warning', 'Включена симуляция голосов', 'Это временная функция для проверки (DEV_TOOLS=1). Тестовые голоса попадают в итоги — перед настоящим голосованием удалите тестовое голосование и уберите переменную DEV_TOOLS.'),
     !data.vkConfigured &&
       (data.devLogin
         ? note('warning', 'Тестовый режим входа', 'Вход через ВКонтакте не настроен, включён тестовый вход. Задайте VK_CLIENT_ID и PUBLIC_URL и уберите DEV_LOGIN перед настоящим голосованием.')
@@ -215,6 +280,18 @@ async function showList() {
       const e = elections.find((x) => x.id === id);
       const act = btn.dataset.act;
       if (act === 'edit') return showEditor(e);
+      if (act === 'simulate') {
+        const body = await simulateDialog(e);
+        if (!body) return;
+        try {
+          const res = await withLoading(btn, () => api(`/api/admin/elections/${id}/simulate`, { method: 'POST', body }));
+          toast(`Добавлено тестовых голосов: ${formatNumber(res.added)}`);
+          showList();
+        } catch (err) {
+          toast(err.message);
+        }
+        return;
+      }
       if (act === 'excel') {
         try {
           await withLoading(btn, () => downloadExcel(e));

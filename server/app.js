@@ -11,6 +11,12 @@ import { resultsXlsx } from './xlsx.js';
 import {
   GENESIS_HASH,
   computeBlockHash,
+  bigIntToBytes,
+  bytesToHex,
+  encryptBallot,
+  fullDomainHash,
+  importElectionPublicKey,
+  randomBytes,
   importElectionPrivateKey,
   rsaPublicFromJwk,
   tallyBlocks,
@@ -223,7 +229,7 @@ export async function createApp(options = {}) {
       startedAt: e.startedAt,
       finishedAt: e.finishedAt,
       tally: e.tally,
-      stats: { ballotsIssued: db.countVoters(e.id), ballotsCast: db.countBlocks(e.id) },
+      stats: { ballotsIssued: db.countVoters(e.id), ballotsCast: db.countBlocks(e.id), simulated: e.simulated ?? 0 },
     };
   }
 
@@ -351,23 +357,29 @@ export async function createApp(options = {}) {
         throw new HttpError(409, 'token_used', 'По этому бюллетеню уже проголосовали');
       }
       if (db.election(e.id)?.status !== 'active') throw new HttpError(403, 'not_active', 'Голосование завершено');
-      const last = db.lastBlock(e.id);
-      const ts = now();
-      ts.setUTCSeconds(0, 0); // время округляется до минуты, чтобы затруднить сопоставление
-      const block = {
-        index: last ? last.index + 1 : 0,
-        timestamp: ts.toISOString(),
-        prevHash: last ? last.hash : GENESIS_HASH,
-        token,
-        signature,
-        ballot,
-      };
-      block.hash = await computeBlockHash(block);
-      block.ledgerSignature = c.signBlock(block.hash);
-      db.addBlock(e.id, block);
+      const block = await appendBlock(e, c, token, signature, ballot);
       return { block: { electionId: e.id, ...block } };
     });
   });
+
+  // Запись бюллетеня в конец цепочки. Вызывается только внутри withLedgerLock.
+  async function appendBlock(e, c, token, signature, ballot) {
+    const last = db.lastBlock(e.id);
+    const ts = now();
+    ts.setUTCSeconds(0, 0); // время округляется до минуты, чтобы затруднить сопоставление
+    const block = {
+      index: last ? last.index + 1 : 0,
+      timestamp: ts.toISOString(),
+      prevHash: last ? last.hash : GENESIS_HASH,
+      token,
+      signature,
+      ballot,
+    };
+    block.hash = await computeBlockHash(block);
+    block.ledgerSignature = c.signBlock(block.hash);
+    db.addBlock(e.id, block);
+    return block;
+  }
 
   // ---------- админ-панель ----------
 
@@ -377,6 +389,7 @@ export async function createApp(options = {}) {
       elections: db.elections().map(adminElection),
       maxVotesPerIp: maxPerIp,
       storageWarning: options.storageWarning ?? false,
+      devTools: options.devTools ?? false,
       vkConfigured: identity.configured,
       devLogin: identity.devLogin,
     };
@@ -437,6 +450,51 @@ export async function createApp(options = {}) {
     fs.mkdirSync(photosDir, { recursive: true });
     fs.writeFileSync(path.join(photosDir, name), buf);
     return { url: `/photos/${name}` };
+  });
+
+  // ВРЕМЕННО, для проверки: симуляция голосов (только при DEV_TOOLS=1).
+  // Голоса проходят тот же путь, что и настоящие: подпись, шифрование, запись в цепочку.
+  route('POST', '/api/admin/elections/:id/simulate', async ({ req, body, params }) => {
+    requireAdmin(req);
+    if (!options.devTools) throw new HttpError(403, 'disabled', 'Симуляция выключена (включается переменной DEV_TOOLS=1)');
+    const e = activeElectionById(params.id);
+    const q = e.questions[0];
+    let choices = [];
+    if (body.mode === 'manual') {
+      for (const cand of q.candidates) {
+        const n = Number(body.counts?.[cand.id] ?? 0);
+        if (!Number.isInteger(n) || n < 0 || n > 5000) throw new HttpError(400, 'invalid', 'Число голосов — целое от 0 до 5000');
+        choices.push(...Array(n).fill(cand.id));
+      }
+    } else {
+      const count = Number(body.count);
+      if (!Number.isInteger(count) || count < 1 || count > 5000) throw new HttpError(400, 'invalid', 'Число голосов — целое от 1 до 5000');
+      // Случайные «симпатии» зрителей, чтобы итоги не были ровными.
+      const weights = q.candidates.map(() => 0.2 + Math.random());
+      const sum = weights.reduce((a, b) => a + b, 0);
+      for (let i = 0; i < count; i++) {
+        let r = Math.random() * sum;
+        const k = weights.findIndex((w) => (r -= w) <= 0);
+        choices.push(q.candidates[k === -1 ? weights.length - 1 : k].id);
+      }
+    }
+    if (!choices.length) throw new HttpError(400, 'invalid', 'Укажите хотя бы один голос');
+    if (choices.length > 5000) throw new HttpError(400, 'invalid', 'За один раз — не больше 5000 голосов');
+    choices = choices.sort(() => Math.random() - 0.5);
+
+    const c = cryptoFor(e);
+    const electionKey = await importElectionPublicKey(c.public.election);
+    return withLedgerLock(async () => {
+      if (db.election(e.id)?.status !== 'active') throw new HttpError(403, 'not_active', 'Голосование завершено');
+      for (const cid of choices) {
+        const token = bytesToHex(randomBytes(32));
+        const fdh = bytesToHex(bigIntToBytes(await fullDomainHash(token, c.rsaPub), c.rsaPub.bytes));
+        const ballot = await encryptBallot(e.id, { [q.id]: cid }, electionKey);
+        await appendBlock(e, c, token, c.blindSign(fdh), ballot);
+      }
+      db.addSimulated(e.id, choices.length);
+      return { added: choices.length, election: adminElection(db.election(e.id)) };
+    });
   });
 
   // Итоги в Excel: баллы = голоса / всего × 160 (формулой).

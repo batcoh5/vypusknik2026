@@ -31,7 +31,12 @@ const { server } = await createApp({
   vkClientId: env.VK_CLIENT_ID,
   publicUrl: env.PUBLIC_URL,
   devLogin: env.DEV_LOGIN === '1',
+  devTools: env.DEV_TOOLS === '1',
 });
+
+if (env.DEV_TOOLS === '1') {
+  console.warn('Включена симуляция голосов (DEV_TOOLS=1) — только для проверки, выключите перед настоящим голосованием!');
+}
 
 if (!env.VK_CLIENT_ID || !env.PUBLIC_URL) {
   console.warn('Вход через ВКонтакте не настроен: задайте VK_CLIENT_ID и PUBLIC_URL (см. README).');
