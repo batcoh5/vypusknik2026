@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import { openDb } from './db.js';
 import { loadSecret, generateElectionKeys, electionCrypto } from './keys.js';
-import { createVkIdentity } from './identity.js';
+import { createPhoneIdentity, AuthError } from './identity.js';
 import {
   GENESIS_HASH,
   computeBlockHash,
@@ -138,10 +138,13 @@ export async function createApp(options = {}) {
 
   const secret = loadSecret(dataDir);
   const db = openDb(dataDir);
-  const identity = createVkIdentity(secret, {
-    vkClientId: options.vkClientId,
-    vkHost: options.vkHost,
-    publicUrl: options.publicUrl,
+  const identity = createPhoneIdentity(secret, {
+    smsApiId: options.smsApiId,
+    smsTest: options.smsTest ?? false,
+    smsSender: options.smsSender,
+    smsDailyLimit: options.smsDailyLimit,
+    smsResendAfter: options.smsResendAfter,
+    powDifficulty: options.powDifficulty,
     secureCookies: options.secureCookies ?? false,
     devLogin: options.devLogin ?? false,
     fetch: options.fetch,
@@ -236,10 +239,15 @@ export async function createApp(options = {}) {
     return e;
   }
 
+  // За прокси (Railway, nginx) реальный адрес приходит в заголовке. X-Real-IP
+  // выставляет сам прокси; в X-Forwarded-For надёжен только последний адрес —
+  // первые клиент может подставить сам.
   function clientIp(req) {
     if (trustProxy) {
+      const real = req.headers['x-real-ip'];
+      if (real) return String(real).trim();
       const fwd = req.headers['x-forwarded-for'];
-      if (fwd) return fwd.split(',')[0].trim();
+      if (fwd) return fwd.split(',').at(-1).trim();
     }
     return req.socket.remoteAddress ?? 'unknown';
   }
@@ -269,12 +277,29 @@ export async function createApp(options = {}) {
     return { election: e ? publicElection(e) : null, serverTime: now().toISOString() };
   });
 
-  // Кто вошёл: имя из ВКонтакте хранится только в cookie самого пользователя.
+  // Кто вошёл: замаскированный номер хранится только в cookie самого пользователя.
   route('GET', '/api/me', async ({ req }) => ({
     user: identity.user(req),
-    vkConfigured: identity.configured,
+    smsConfigured: identity.configured,
     devLogin: identity.devLogin,
   }));
+
+  // ---------- вход по номеру телефона ----------
+
+  route('GET', '/api/auth/challenge', async () => identity.challenge());
+
+  route('POST', '/api/auth/send', async ({ req, body }) => identity.sendCode(body, clientIp(req)));
+
+  route('POST', '/api/auth/verify', async ({ res, body }) => {
+    const { cookie, user } = identity.verifyCode(body);
+    res.setHeader('Set-Cookie', cookie);
+    return { user };
+  });
+
+  route('POST', '/api/auth/logout', async ({ res }) => {
+    res.setHeader('Set-Cookie', identity.logoutCookie());
+    return { ok: true };
+  });
 
   route('GET', '/api/elections/:id', async ({ params }) => ({
     election: publicElection(publicElectionById(params.id)),
@@ -293,7 +318,7 @@ export async function createApp(options = {}) {
     const e = activeElectionById(params.id);
     const c = cryptoFor(e);
     const id = identity.identify(req);
-    if (!id) throw new HttpError(401, 'no_session', 'Войдите через ВКонтакте, чтобы проголосовать');
+    if (!id) throw new HttpError(401, 'no_session', 'Подтвердите номер телефона, чтобы проголосовать');
     const blinded = String(body.blinded ?? '').toLowerCase();
     if (!/^[0-9a-f]+$/.test(blinded) || blinded.length !== c.rsaPub.bytes * 2) {
       throw new HttpError(400, 'bad_request', 'Некорректный запрос');
@@ -304,7 +329,7 @@ export async function createApp(options = {}) {
       if (voter) {
         // Повтор того же запроса (например, оборвалась связь) — отдаём ту же подпись.
         if (voter.blinded === blinded) return { blindSignature: voter.blind_sig };
-        throw new HttpError(409, 'already_issued', 'С этого аккаунта ВКонтакте уже проголосовали в этом голосовании');
+        throw new HttpError(409, 'already_issued', 'С этого номера телефона уже проголосовали в этом голосовании');
       }
       if (maxPerIp > 0 && db.countVotersByIp(e.id, ip) >= maxPerIp) {
         throw new HttpError(429, 'ip_limit', 'Превышено число бюллетеней для вашей сети');
@@ -382,7 +407,13 @@ export async function createApp(options = {}) {
 
   route('GET', '/api/admin/elections', async ({ req }) => {
     requireAdmin(req);
-    return { elections: db.elections().map(adminElection), maxVotesPerIp: maxPerIp };
+    return {
+      elections: db.elections().map(adminElection),
+      maxVotesPerIp: maxPerIp,
+      storageWarning: options.storageWarning ?? false,
+      smsConfigured: identity.configured,
+      devLogin: identity.devLogin,
+    };
   });
 
   route('POST', '/api/admin/elections', async ({ req, body }) => {
@@ -505,13 +536,6 @@ export async function createApp(options = {}) {
   async function handle(req, res) {
     const url = new URL(req.url, 'http://localhost');
     try {
-      if (url.pathname.startsWith('/auth/') && req.method === 'GET') {
-        if (!apiLimiter(clientIp(req))) throw new HttpError(429, 'rate_limited', 'Слишком много запросов. Попробуйте через минуту');
-        if (url.pathname === '/auth/vk/start') return identity.start(req, res, url);
-        if (url.pathname === '/auth/vk/callback') return await identity.callback(req, res, url);
-        if (url.pathname === '/auth/logout') return identity.logout(req, res);
-        if (url.pathname === '/auth/dev' && identity.devLogin) return identity.dev(req, res, url);
-      }
       if (url.pathname.startsWith('/api/')) {
         if (!apiLimiter(clientIp(req))) {
           throw new HttpError(429, 'rate_limited', 'Слишком много запросов. Попробуйте через минуту');
@@ -544,6 +568,7 @@ export async function createApp(options = {}) {
       res.end(fs.readFileSync(path.join(PUBLIC_DIR, '404.html')));
     } catch (err) {
       if (err instanceof HttpError) return send(res, err.status, { error: err.code, message: err.message });
+      if (err instanceof AuthError) return send(res, err.status, { error: err.code, message: err.message, ...err.extra });
       console.error(err);
       return send(res, 500, { error: 'internal', message: 'Внутренняя ошибка сервера' });
     }
