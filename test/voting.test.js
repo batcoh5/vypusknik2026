@@ -126,6 +126,10 @@ test('без запущенного голосования на сайте ег�
 test('админка требует ключ и проверяет данные', async () => {
   const api = client();
   assert.equal((await api('GET', '/api/admin/elections')).status, 401);
+  // Название необязательно: без него голосование называется «Зрительское голосование».
+  const untitled = await asAdmin('POST', '/api/admin/elections', { candidates: [{ name: 'один' }, { name: 'два' }] });
+  assert.equal(untitled.data.election.title, 'Зрительское голосование');
+  await asAdmin('DELETE', `/api/admin/elections/${untitled.data.election.id}`);
   const bad = await asAdmin('POST', '/api/admin/elections', { title: 'X', candidates: [{ name: 'один' }] });
   assert.equal(bad.status, 400);
 });

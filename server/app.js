@@ -107,7 +107,8 @@ function text(value, field, { min = 0, max }) {
 }
 
 export function normalizeElectionInput(body) {
-  const title = text(body.title, 'Название голосования', { min: 1, max: 120 });
+  // Название на сайте не показывается; нужно только для Excel и старых данных.
+  const title = text(body.title, 'Название голосования', { max: 120 }) || 'Зрительское голосование';
   const description = text(body.description, 'Описание', { max: 1000 });
   let endsAt = null;
   if (body.endsAt) {
@@ -505,13 +506,13 @@ export async function createApp(options = {}) {
     if (!e.tally) throw new HttpError(409, 'not_finished', 'Итоги появятся после завершения голосования');
     const q = e.questions[0];
     const file = resultsXlsx({
-      title: e.title,
+      title: 'Зрительское голосование «Выпускник Краснообска 2026»',
       finishedAt: new Date(e.finishedAt).toLocaleString('ru-RU', { timeZone: 'Asia/Novosibirsk' }),
       candidates: q.candidates.map((c) => ({ name: c.name, description: c.description, votes: e.tally.counts[q.id][c.id] ?? 0 })),
     });
     res.writeHead(200, {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'Content-Disposition': `attachment; filename="results.xlsx"; filename*=UTF-8''${encodeURIComponent(`Итоги — ${e.title}.xlsx`)}`,
+      'Content-Disposition': `attachment; filename="results.xlsx"; filename*=UTF-8''${encodeURIComponent('Итоги зрительского голосования.xlsx')}`,
       'Cache-Control': 'no-store',
       ...SECURITY_HEADERS,
     });
