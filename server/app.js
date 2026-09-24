@@ -236,10 +236,15 @@ export async function createApp(options = {}) {
     return e;
   }
 
+  // За прокси (Railway, nginx) реальный адрес приходит в заголовке. X-Real-IP
+  // выставляет сам прокси; в X-Forwarded-For надёжен только последний адрес —
+  // первые клиент может подставить сам.
   function clientIp(req) {
     if (trustProxy) {
+      const real = req.headers['x-real-ip'];
+      if (real) return String(real).trim();
       const fwd = req.headers['x-forwarded-for'];
-      if (fwd) return fwd.split(',')[0].trim();
+      if (fwd) return fwd.split(',').at(-1).trim();
     }
     return req.socket.remoteAddress ?? 'unknown';
   }
