@@ -14,9 +14,6 @@ import {
   confetti,
   typeText,
   VK_URL,
-  shake,
-  toast,
-  withLoading,
 } from './common.js';
 import {
   blindToken,
@@ -29,11 +26,10 @@ import {
   computeBlockHash,
   verifyLedgerSignature,
 } from './core.js';
-import { solveChallenge } from './pow.js';
 
 renderChrome();
 
-const STEPS = ['Телефон', 'Бюллетень', 'Проверка', 'Отправка', 'Квитанция'];
+const STEPS = ['Вход', 'Бюллетень', 'Проверка', 'Отправка', 'Квитанция'];
 const stepBox = document.getElementById('step');
 const stepper = document.getElementById('stepper');
 
@@ -70,155 +66,22 @@ function showMessage(kind, title, text, actions = '') {
   render(`${note(kind, title, text)}${actions ? `<div class="actions">${actions}</div>` : ''}`);
 }
 
-// ---------- шаг 1: подтверждение номера телефона ----------
+// ---------- шаг 1: вход через ВКонтакте ----------
 
-// +7 (912) 345-67-89
-function formatPhone(value) {
-  let d = value.replace(/\D/g, '');
-  if (d.startsWith('8')) d = '7' + d.slice(1);
-  if (!d.startsWith('7')) d = '7' + d;
-  d = d.slice(0, 11);
-  const p = d.slice(1);
-  let out = '+7';
-  if (p.length) out += ' (' + p.slice(0, 3);
-  if (p.length >= 3) out += ')';
-  if (p.length > 3) out += ' ' + p.slice(3, 6);
-  if (p.length > 6) out += '-' + p.slice(6, 8);
-  if (p.length > 8) out += '-' + p.slice(8, 10);
-  return out;
-}
-const phoneDigits = (v) => v.replace(/\D/g, '');
-
-function stepLogin(prefill = '') {
+function stepLogin() {
   setStep(0);
-  const canLogin = me.smsConfigured || me.devLogin;
+  const failed = new URLSearchParams(location.search).get('auth') === 'failed';
+  const loginButton = me.vkConfigured
+    ? `<a class="btn btn--vk btn--lg" href="/auth/vk/start?return=/vote">${icons.vk} Войти через ВКонтакте</a>`
+    : me.devLogin
+      ? `<a class="btn btn--primary btn--lg" href="/auth/dev?return=/vote">Тестовый вход (без ВКонтакте)</a>`
+      : '';
   render(`
-    <h2>Подтвердите номер телефона</h2>
+    <h2>Войдите, чтобы проголосовать</h2>
     <p class="muted top-gap-sm">Голосование проходит ${election.endsAt ? `до ${formatDate(election.endsAt)} (время новосибирское)` : 'до объявления итогов оргкомитетом'}.</p>
-    ${note('info', 'Один номер — один голос', 'Мы пришлём SMS с кодом. Номер нужен только для того, чтобы никто не проголосовал дважды: он не сохраняется, а бюллетень шифруется и заверяется слепой подписью — связать голос с номером невозможно.', icons.shield)}
-    ${
-      canLogin
-        ? `<form id="phone-form" class="top-gap-sm" novalidate>
-            <label class="label" for="phone">Мобильный номер</label>
-            <div class="row">
-              <input class="input input--phone" id="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+7 (9__) ___-__-__" value="${escapeHtml(prefill)}">
-              <button class="btn btn--brand btn--lg" type="submit" id="send-code">Получить код ${icons.arrow}</button>
-            </div>
-            <div id="pow" class="pow hidden"><span class="shimmer" id="pow-text">Проверяем, что вы не робот</span><div class="progress"><div class="progress__fill" id="pow-bar"></div></div></div>
-            <div id="phone-error"></div>
-          </form>`
-        : note('warning', 'Вход ещё не настроен', 'Организаторы пока не подключили отправку SMS. Загляните чуть позже.')
-    }`);
-  if (!canLogin) return;
-  const form = document.getElementById('phone-form');
-  const input = document.getElementById('phone');
-  const button = document.getElementById('send-code');
-  input.addEventListener('input', () => (input.value = formatPhone(input.value)));
-  input.addEventListener('focus', () => !input.value && (input.value = '+7 ('));
-  input.focus();
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const errBox = document.getElementById('phone-error');
-    errBox.innerHTML = '';
-    const digits = phoneDigits(input.value);
-    if (!/^79\d{9}$/.test(digits)) {
-      shake(form);
-      errBox.innerHTML = note('danger', 'Проверьте номер', 'Нужен российский мобильный номер: +7 (9XX) XXX-XX-XX.');
-      return;
-    }
-    button.disabled = true;
-    input.disabled = true;
-    const pow = document.getElementById('pow');
-    const bar = document.getElementById('pow-bar');
-    pow.classList.remove('hidden');
-    try {
-      const { challenge, difficulty } = await api('/api/auth/challenge');
-      const nonce = await solveChallenge(challenge, difficulty, (p) => (bar.style.width = `${p * 100}%`));
-      bar.style.width = '100%';
-      document.getElementById('pow-text').textContent = 'Отправляем SMS';
-      const res = await api('/api/auth/send', { method: 'POST', body: { phone: digits, challenge, nonce } });
-      stepCode(digits, res);
-    } catch (err) {
-      pow.classList.add('hidden');
-      button.disabled = false;
-      input.disabled = false;
-      shake(form);
-      errBox.innerHTML = note('danger', 'Не удалось отправить код', escapeHtml(err.message));
-    }
-  });
-}
-
-function stepCode(digits, sent) {
-  setStep(0);
-  render(`
-    <h2>Введите код из SMS</h2>
-    <p class="muted top-gap-sm">Код отправлен на номер <b class="text">${escapeHtml(sent.phone)}</b> · <button class="link" id="change">Изменить номер</button></p>
-    ${sent.devCode ? note('warning', 'Тестовый режим', `SMS не отправляется. Ваш код: <b class="text mono">${escapeHtml(sent.devCode)}</b>`) : ''}
-    <form id="code-form" class="top-gap-sm" novalidate>
-      <label class="label" for="code">Код из 6 цифр</label>
-      <div class="row">
-        <input class="input input--code" id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="••••••">
-        <button class="btn btn--brand btn--lg" type="submit" id="verify">Подтвердить ${icons.arrow}</button>
-      </div>
-      <div id="code-error"></div>
-      <p class="small muted top-gap-sm" id="resend-box"></p>
-    </form>`);
-  const form = document.getElementById('code-form');
-  const input = document.getElementById('code');
-  const button = document.getElementById('verify');
-  const resendBox = document.getElementById('resend-box');
-  input.focus();
-  document.getElementById('change').addEventListener('click', () => stepLogin(formatPhone(digits)));
-
-  let left = sent.resendIn ?? 60;
-  const tick = () => {
-    if (!document.body.contains(resendBox)) return clearInterval(timer);
-    if (left > 0) {
-      resendBox.textContent = `Отправить код повторно можно через ${left} с`;
-      left--;
-    } else {
-      clearInterval(timer);
-      resendBox.innerHTML = '<button class="link" id="resend" type="button">Отправить код ещё раз</button>';
-      document.getElementById('resend').addEventListener('click', () => stepLogin(formatPhone(digits)));
-    }
-  };
-  const timer = setInterval(tick, 1000);
-  tick();
-
-  const submit = async () => {
-    const code = input.value.replace(/\D/g, '');
-    const errBox = document.getElementById('code-error');
-    errBox.innerHTML = '';
-    if (code.length !== 6) {
-      shake(form);
-      return;
-    }
-    button.disabled = true;
-    try {
-      await withLoading(button, () => api('/api/auth/verify', { method: 'POST', body: { phone: digits, code } }));
-      clearInterval(timer);
-      toast('Номер подтверждён');
-      main();
-    } catch (err) {
-      button.disabled = false;
-      input.select();
-      shake(form);
-      errBox.innerHTML = note('danger', 'Код не подошёл', escapeHtml(err.message));
-    }
-  };
-  input.addEventListener('input', () => {
-    input.value = input.value.replace(/\D/g, '').slice(0, 6);
-    if (input.value.length === 6) submit();
-  });
-  form.addEventListener('submit', (e) => {
-    e.preventDefault();
-    submit();
-  });
-}
-
-async function logout() {
-  await api('/api/auth/logout', { method: 'POST' });
-  main();
+    ${failed ? note('danger', 'Не удалось войти', 'Вход через ВКонтакте не завершился. Попробуйте ещё раз.') : ''}
+    ${note('info', 'Один аккаунт ВКонтакте — один голос', 'Вход нужен только для того, чтобы никто не проголосовал дважды. Сайт не узнаёт, за кого вы голосуете: бюллетень шифруется и заверяется слепой подписью, поэтому связать голос с аккаунтом невозможно.', icons.shield)}
+    ${loginButton ? `<div class="actions">${loginButton}</div>` : note('warning', 'Вход ещё не настроен', 'Организаторы пока не подключили вход через ВКонтакте. Загляните чуть позже.')}`);
 }
 
 // ---------- шаг 1б: подтверждение ----------
@@ -227,7 +90,7 @@ function stepAuth() {
   setStep(0);
   render(`
     <h2>Подтверждение участника</h2>
-    <p class="muted top-gap-sm">Номер <b class="text">${escapeHtml(me.user?.phone ?? '')}</b> подтверждён · <button class="link" id="logout">Выйти</button></p>
+    <p class="muted top-gap-sm">Вы вошли${me.user?.name ? ` как <b class="text">${escapeHtml(me.user.name)}</b>` : ''} · <a class="link" href="/auth/logout">Выйти</a></p>
     <div class="top-gap-sm">
       <label class="check">
         <input type="checkbox" id="agree">
@@ -237,7 +100,6 @@ function stepAuth() {
     <div class="actions">
       <button class="btn btn--brand btn--lg" id="next" disabled>Получить бюллетень ${icons.arrow}</button>
     </div>`);
-  document.getElementById('logout').addEventListener('click', logout);
   const agree = document.getElementById('agree');
   const next = document.getElementById('next');
   agree.addEventListener('change', () => (next.disabled = !agree.checked));
@@ -528,7 +390,7 @@ async function main() {
     return showMessage(
       'warning',
       'Вы уже проголосовали',
-      'С этого номера телефона уже проголосовали в этом голосовании. Проголосовать можно только один раз.',
+      'С этого аккаунта ВКонтакте уже проголосовали в этом голосовании. Проголосовать можно только один раз.',
       `<a class="btn btn--primary" href="/verify">Проверить голос</a><a class="btn btn--glass" href="/ledger">Открыть реестр</a>`,
     );
   }

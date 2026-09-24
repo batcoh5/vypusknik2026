@@ -2177,31 +2177,25 @@ fieldset.question {
   fill: var(--muted);
 }
 
+/* кнопка входа через ВКонтакте */
+.btn--vk {
+  color: #fff;
+  background: #0077ff;
+  box-shadow: 0 8px 28px rgba(0, 119, 255, 0.35);
+}
+.btn--vk:hover {
+  background: #1a85ff;
+}
+.btn--vk svg {
+  width: 20px;
+  height: 20px;
+}
 .text {
   color: var(--text);
 }
 
-/* вход по номеру телефона */
-.input--phone {
-  flex: 1 1 240px;
-  font-size: 18px;
-  letter-spacing: 0.02em;
-  font-variant-numeric: tabular-nums;
-}
-.input--code {
-  flex: 0 1 220px;
-  font: 600 24px/1 var(--mono);
-  letter-spacing: 0.4em;
-  text-align: center;
-}
-.input:disabled {
-  opacity: 0.6;
-}
-.pow {
+/* сообщения об ошибке под формой — с отступом от полей */
+[id$='-error']:not(:empty),
+[id$='-report']:not(:empty) {
   margin-top: 16px;
-  font-size: 13px;
-  animation: swap-in 0.4s var(--ease) both;
-}
-.pow .progress {
-  margin-top: 8px;
 }
