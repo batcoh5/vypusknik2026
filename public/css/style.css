@@ -2650,3 +2650,30 @@ fieldset.question {
 .hero__lead[hidden] {
   display: none;
 }
+
+/* ---------- логотипы организаторов в подвале ---------- */
+
+.footer .partners li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.footer .partners li + li {
+  margin-top: 4px;
+}
+.partner__logo {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 5px;
+  border-radius: 10px;
+  background: #fff;
+}
+.partner__logo img {
+  display: block;
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+}
