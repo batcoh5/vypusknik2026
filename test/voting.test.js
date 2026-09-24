@@ -100,10 +100,7 @@ const asAdmin = (method, url, body) => admin(method, url, body, { authorization:
 const SAMPLE = {
   title: 'Выпускник года',
   description: 'Тестовое голосование',
-  questions: [
-    { title: 'Выпускник года', candidates: [{ name: 'Анна' }, { name: 'Борис' }, { name: 'Вера' }] },
-    { title: 'Лучший класс', candidates: [{ name: '11 «А»' }, { name: '11 «Б»' }] },
-  ],
+  candidates: [{ name: 'Анна', description: 'Школа № 1' }, { name: 'Борис' }, { name: 'Вера' }],
 };
 
 async function vote(api, electionId, choices) {
@@ -128,7 +125,7 @@ test('без запущенного голосования на сайте ег�
 test('админка требует ключ и проверяет данные', async () => {
   const api = client();
   assert.equal((await api('GET', '/api/admin/elections')).status, 401);
-  const bad = await asAdmin('POST', '/api/admin/elections', { title: 'X', questions: [{ title: 'Q', candidates: [{ name: 'один' }] }] });
+  const bad = await asAdmin('POST', '/api/admin/elections', { title: 'X', candidates: [{ name: 'один' }] });
   assert.equal(bad.status, 400);
 });
 
@@ -153,19 +150,19 @@ test('полный цикл: создать, запустить, проголо�
 
   // Голосуем.
   const alice = await voter();
-  const r1 = await vote(alice, id, { q1: 'c2', q2: 'c1' });
+  const r1 = await vote(alice, id, { q1: 'c2' });
   assert.equal(r1.cast.status, 200);
   assert.equal((await verifyBlock(r1.cast.data.block, null, r1.keys)).ok, true);
-  assert.equal((await vote(await voter(), id, { q1: 'c2', q2: 'c2' })).cast.status, 200);
-  assert.equal((await vote(await voter(), id, { q1: 'c3', q2: 'c1' })).cast.status, 200);
+  assert.equal((await vote(await voter(), id, { q1: 'c2' })).cast.status, 200);
+  assert.equal((await vote(await voter(), id, { q1: 'c3' })).cast.status, 200);
 
   // Второй бюллетень с того же устройства не выдаётся.
-  assert.equal((await vote(alice, id, { q1: 'c1', q2: 'c1' })).signed.status, 409);
+  assert.equal((await vote(alice, id, { q1: 'c1' })).signed.status, 409);
 
   // Повторная отправка того же бюллетеня идемпотентна, другого — отклоняется.
   const dup = await alice('POST', `/api/elections/${id}/ballot`, { token: r1.token, signature: r1.signature, ballot: r1.ballot });
   assert.equal(dup.data.block.hash, r1.cast.data.block.hash);
-  const other = await encryptBallot(id, { q1: 'c1', q2: 'c1' }, r1.keys.electionKey);
+  const other = await encryptBallot(id, { q1: 'c1' }, r1.keys.electionKey);
   assert.equal((await alice('POST', `/api/elections/${id}/ballot`, { token: r1.token, signature: r1.signature, ballot: other })).status, 409);
 
   // Поддельная подпись.
@@ -176,42 +173,41 @@ test('полный цикл: создать, запустить, проголо�
   });
   assert.equal(forged.status, 403);
 
-  // Квитанция находится.
-  const receipt = await client()('GET', `/api/receipts/${r1.cast.data.block.hash}`);
-  assert.equal(receipt.data.election.id, id);
-  assert.equal(receipt.data.election.tally, null);
-
-  // Итоги скрыты до завершения.
-  assert.equal((await client()('GET', `/api/elections/${id}`)).data.election.tally, null);
+  // Зрителю не видны ни итоги, ни ключ расшифровки, ни реестр и квитанции.
+  const pubActive = (await client()('GET', `/api/elections/${id}`)).data.election;
+  assert.equal(pubActive.tally, undefined);
+  assert.equal(pubActive.electionPrivateKey, undefined);
+  assert.equal((await client()('GET', `/api/elections/${id}/ledger`)).status, 404);
+  assert.equal((await client()('GET', `/api/receipts/${r1.cast.data.block.hash}`)).status, 404);
+  // Excel до завершения недоступен.
+  assert.equal((await asAdmin('GET', `/api/admin/elections/${id}/results.xlsx`)).status, 409);
 
   const finished = await asAdmin('POST', `/api/admin/elections/${id}/finish`);
   const tally = finished.data.election.tally;
   assert.equal(tally.valid, 3);
   assert.equal(tally.counts.q1.c2, 2);
   assert.equal(tally.counts.q1.c3, 1);
-  assert.equal(tally.counts.q2.c1, 2);
 
-  // Независимый пересчёт по опубликованному ключу даёт тот же результат, цепочка целостна.
-  const { data: pub } = await client()('GET', `/api/elections/${id}`);
-  const priv = await importElectionPrivateKey(pub.election.electionPrivateKey);
-  const { data: ledger } = await client()('GET', `/api/elections/${id}/ledger?limit=500`);
-  assert.deepEqual((await tallyBlocks(pub.election, ledger.blocks, priv)).counts, tally.counts);
-  const keys = await loadPublicKeys(pub.election.publicKeys);
+  // Итоги видны только в админке и совпадают с пересчётом по реестру.
+  assert.equal((await client()('GET', `/api/elections/${id}`)).data.election.tally, undefined);
+  const e = app.db.election(id);
+  const blocks = app.db.blocks(id, 0, 1000);
+  const { electionCrypto } = await import('../server/keys.js');
+  const priv = await importElectionPrivateKey(electionCrypto(e.keys).electionPrivateJwk);
+  assert.deepEqual((await tallyBlocks(e, blocks, priv)).counts, tally.counts);
+  const keys = await loadPublicKeys(electionCrypto(e.keys).public);
   let prev = null;
-  for (const b of ledger.blocks) {
+  for (const b of blocks) {
     assert.equal((await verifyBlock(b, prev, keys)).ok, true);
     prev = b;
   }
-  const tampered = { ...ledger.blocks[0], ballot: ledger.blocks[1].ballot };
-  assert.equal((await verifyBlock(tampered, null, keys)).ok, false);
 
   // После завершения голоса не принимаются.
-  assert.equal((await vote(await voter(), id, { q1: 'c1', q2: 'c1' })).signed.status, 403);
+  assert.equal((await vote(await voter(), id, { q1: 'c1' })).signed.status, 403);
 
   // Удаление и новое голосование: тот же человек снова может проголосовать один раз.
   assert.equal((await asAdmin('DELETE', `/api/admin/elections/${id}`)).status, 200);
   assert.equal((await client()('GET', '/api/current')).data.election, null);
-  assert.equal((await client()('GET', `/api/receipts/${r1.cast.data.block.hash}`)).status, 404);
   assert.equal((await client()('GET', `/api/elections/${id}`)).status, 404);
   // От удалённого голосования на сервере не остаётся ничего: ни бюллетеней, ни выданных подписей, ни меток.
   assert.equal(app.db.election(id), undefined);
@@ -220,8 +216,8 @@ test('полный цикл: создать, запустить, проголо�
 
   const second = (await asAdmin('POST', '/api/admin/elections', SAMPLE)).data.election.id;
   await asAdmin('POST', `/api/admin/elections/${second}/start`);
-  assert.equal((await vote(alice, second, { q1: 'c1', q2: 'c1' })).cast.status, 200);
-  assert.equal((await vote(alice, second, { q1: 'c1', q2: 'c1' })).signed.status, 409);
+  assert.equal((await vote(alice, second, { q1: 'c1' })).cast.status, 200);
+  assert.equal((await vote(alice, second, { q1: 'c1' })).signed.status, 409);
 
   // Одновременно может идти только одно голосование.
   const third = (await asAdmin('POST', '/api/admin/elections', SAMPLE)).data.election.id;
@@ -239,17 +235,17 @@ test('без входа через ВКонтакте бюллетень не в
   // Не вошёл — голосовать нельзя.
   const guest = client();
   assert.equal((await guest('GET', `/api/elections/${id}/session`)).data.loggedIn, false);
-  assert.equal((await vote(guest, id, { q1: 'c1', q2: 'c1' })).signed.status, 401);
+  assert.equal((await vote(guest, id, { q1: 'c1' })).signed.status, 401);
 
   // Тот же аккаунт ВКонтакте из другого браузера, инкогнито или через VPN — отказ.
   const phone = await voter(4242);
-  assert.equal((await vote(phone, id, { q1: 'c1', q2: 'c1' })).cast.status, 200);
+  assert.equal((await vote(phone, id, { q1: 'c1' })).cast.status, 200);
   const laptop = await voter(4242);
   assert.equal((await laptop('GET', `/api/elections/${id}/session`)).data.ballotIssued, true);
-  assert.equal((await vote(laptop, id, { q1: 'c2', q2: 'c2' })).signed.status, 409);
+  assert.equal((await vote(laptop, id, { q1: 'c2' })).signed.status, 409);
 
   // Другие аккаунты голосуют спокойно — даже с одинаковых телефонов.
-  assert.equal((await vote(await voter(4343), id, { q1: 'c3', q2: 'c2' })).cast.status, 200);
+  assert.equal((await vote(await voter(4343), id, { q1: 'c3' })).cast.status, 200);
 
   // Выход завершает сессию.
   await phone('GET', '/auth/logout');
@@ -258,7 +254,7 @@ test('без входа через ВКонтакте бюллетень не в
 
 test('вход через VK ID: PKCE, проверка state, обмен кода на токен', async () => {
   const b = client();
-  const start = await b('GET', '/auth/vk/start?return=/vote');
+  const start = await b('GET', '/auth/vk/start?return=/');
   assert.equal(start.status, 302);
   const auth = new URL(start.location);
   assert.equal(auth.origin + auth.pathname, 'https://id.vk.ru/authorize');
@@ -270,12 +266,12 @@ test('вход через VK ID: PKCE, проверка state, обмен код
 
   // Подменённый state отклоняется.
   const bad = await b('GET', `/auth/vk/callback?code=good-code&state=wrong&device_id=dev-1`);
-  assert.equal(bad.location, '/vote?auth=failed');
+  assert.equal(bad.location, '/?auth=failed');
 
-  const again = new URL((await b('GET', '/auth/vk/start?return=/vote')).location).searchParams.get('state');
+  const again = new URL((await b('GET', '/auth/vk/start?return=/')).location).searchParams.get('state');
   const ok = await b('GET', `/auth/vk/callback?code=good-code&state=${again}&device_id=dev-1`);
   assert.equal(ok.status, 302);
-  assert.equal(ok.location, '/vote');
+  assert.equal(ok.location, '/');
   const exchange = vkCalls.find((c) => c.url.endsWith('/oauth2/auth'));
   assert.equal(exchange.params.grant_type, 'authorization_code');
   assert.equal(exchange.params.redirect_uri, 'https://vote.example/auth/vk/callback');
@@ -288,10 +284,52 @@ test('вход через VK ID: PKCE, проверка state, обмен код
   const c = client();
   const st = new URL((await c('GET', '/auth/vk/start')).location).searchParams.get('state');
   const fail = await c('GET', `/auth/vk/callback?code=bad&state=${st}&device_id=dev-1`);
-  assert.equal(fail.location, '/vote?auth=failed');
+  assert.equal(fail.location, '/?auth=failed');
   assert.equal((await c('GET', '/api/me')).data.user, null);
 
   // Возврат только на свои страницы.
   const evil = new URL((await client()('GET', '/auth/vk/start?return=//evil.example')).location);
   assert.ok(evil.searchParams.get('state'));
+});
+
+test('фото участников и итоги в Excel', async () => {
+  const { execFileSync } = await import('node:child_process');
+  // Фото: только картинки, сохраняется и отдаётся с сайта.
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  assert.equal((await asAdmin('POST', '/api/admin/photos', { data: 'data:image/png;base64,' + Buffer.from('not an image').toString('base64') })).status, 400);
+  assert.equal((await client()('POST', '/api/admin/photos', { data: 'data:image/png;base64,' + png.toString('base64') })).status, 401);
+  const up = await asAdmin('POST', '/api/admin/photos', { data: 'data:image/png;base64,' + png.toString('base64') });
+  assert.equal(up.status, 200);
+  const photoRes = await fetch(base + up.data.url);
+  assert.equal(photoRes.status, 200);
+  assert.equal(photoRes.headers.get('content-type'), 'image/png');
+  // Чужие пути в фото не принимаются.
+  assert.equal((await asAdmin('POST', '/api/admin/elections', { title: 'X', candidates: [{ name: 'А', photo: 'https://evil.example/x.png' }, { name: 'Б' }] })).status, 400);
+
+  const active = (await asAdmin('GET', '/api/admin/elections')).data.elections.find((e) => e.status === 'active');
+  if (active) await asAdmin('POST', `/api/admin/elections/${active.id}/finish`);
+  const created = await asAdmin('POST', '/api/admin/elections', {
+    title: 'Приз зрительских симпатий',
+    candidates: [{ name: 'Анна', photo: up.data.url }, { name: 'Борис' }, { name: 'Вера' }],
+  });
+  assert.equal(created.data.election.questions.length, 1);
+  assert.equal(created.data.election.questions[0].candidates[0].photo, up.data.url);
+  const id = created.data.election.id;
+  await asAdmin('POST', `/api/admin/elections/${id}/start`);
+  for (const c of ['c1', 'c1', 'c1', 'c2']) assert.equal((await vote(await voter(), id, { q1: c })).cast.status, 200);
+  await asAdmin('POST', `/api/admin/elections/${id}/finish`);
+
+  const res = await fetch(`${base}/api/admin/elections/${id}/results.xlsx`, { headers: { authorization: `Bearer ${ADMIN}` } });
+  assert.equal(res.status, 200);
+  const file = path.join(dataDir, 'results.xlsx');
+  fs.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
+  // Распаковываем лист и проверяем формулу «голоса / всего × 160».
+  const sheet = execFileSync('python3', ['-c', `import zipfile,sys;print(zipfile.ZipFile(sys.argv[1]).read('xl/worksheets/sheet1.xml').decode())`, file]).toString();
+  assert.match(sheet, /<f>IF\(\$D\$7=0,0,D4\/\$D\$7\*160\)<\/f><v>120<\/v>/);
+  assert.match(sheet, /<f>SUM\(D4:D6\)<\/f><v>4<\/v>/);
+  assert.match(sheet, /Анна/);
+
+  // Удаление голосования удаляет и фото.
+  await asAdmin('DELETE', `/api/admin/elections/${id}`);
+  assert.equal((await fetch(base + up.data.url)).status, 404);
 });

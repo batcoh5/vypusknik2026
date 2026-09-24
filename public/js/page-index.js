@@ -1,54 +1,53 @@
+// Единственная страница для зрителя: выбрать участника → войти через ВКонтакте → проголосовать.
+
 import {
   api,
   renderChrome,
-  statusBadge,
-  formatDate,
   escapeHtml,
-  plural,
+  formatDate,
   initials,
   initReveal,
-  countUp,
   icons,
+  note,
+  store,
+  pendingKey,
+  votedKey,
+  confetti,
+  confirmDialog,
+  withLoading,
+  toast,
   VK_URL,
 } from './common.js';
+import { blindToken, bytesToHex, encryptBallot, loadPublicKeys, randomBytes, unblindSignature, verifyTokenSignature } from './core.js';
 
 renderChrome();
 
-const HOW = [
-  [icons.user, 'Один человек — один голос', 'Для голосования нужен вход через ВКонтакте: один аккаунт — один бюллетень в каждом голосовании.'],
-  [icons.eyeOff, 'Тайна голосования', 'Комиссия заверяет бюллетень «слепой подписью», не видя его. Связать голос с человеком невозможно.'],
-  [icons.lock, 'Шифрование в браузере', 'Выбор шифруется прямо на вашем устройстве. До конца голосования промежуточных итогов не видит никто.'],
-  [icons.blocks, 'Открытый реестр', 'Каждый бюллетень записывается в цепочку блоков. Подменить или удалить голос незаметно нельзя.'],
-  [icons.receipt, 'Квитанция', 'После голосования вы получаете номер квитанции и в любой момент можете проверить, что голос учтён.'],
-  [icons.chart, 'Пересчёт итогов', 'После завершения публикуется ключ расшифровки — любой может пересчитать голоса сам.'],
-];
+const root = document.getElementById('vote-root');
+const bar = document.getElementById('vote-bar');
+const barChoice = document.getElementById('vote-bar-choice');
+const voteButton = document.getElementById('vote-button');
+const CHOICE_KEY = 'vyp26:choice';
 
-const FAQ = [
-  ['Зачем входить через ВКонтакте?', 'Чтобы каждый голосовал один раз: один аккаунт ВКонтакте — один бюллетень в каждом голосовании. Сайт не узнаёт, за кого вы проголосовали: связать бюллетень с аккаунтом невозможно.'],
-  ['Можно ли проголосовать повторно или изменить голос?', 'Нет. В каждом голосовании бюллетень выдаётся один раз на аккаунт ВКонтакте, а каждая подпись комиссии принимается в реестр только один раз. Отправленный голос изменить нельзя.'],
-  ['Что такое квитанция?', 'Это уникальный номер блока с вашим зашифрованным бюллетенем в реестре. Она сохраняется на устройстве, её можно скопировать или скачать. По квитанции видно, что голос записан, не изменён и учтён.'],
-  ['Может ли кто-то узнать, за кого я проголосовал?', 'Реестр избирателей и реестр бюллетеней разделены, а бюллетень заверяется слепой подписью. Выбор зашифрован до конца голосования. Не показывайте никому свою квитанцию — после публикации итогов по ней можно увидеть расшифрованный бюллетень.'],
-  ['Как убедиться, что итоги честные?', 'После завершения на странице «Итоги» нажмите «Пересчитать самостоятельно»: браузер скачает весь реестр, проверит цепочку и подписи и подсчитает голоса сам.'],
-  ['Где следить за новостями конкурса?', 'Все новости, этапы и участники — в официальной группе конкурса «Выпускник Краснообска» во ВКонтакте.'],
-];
+let election;
+let me;
+let session;
+let selected = null;
 
-function renderStatic() {
-  document.getElementById('how-grid').innerHTML = HOW.map(
-    ([icon, title, text], i) => `
-      <div class="card card--hover spot step-card" data-reveal data-d="${i * 70}">
-        <div class="icon-box">${icon}</div>
-        <h3>${title}</h3>
-        <p>${text}</p>
-      </div>`,
-  ).join('');
-  document.getElementById('faq-list').innerHTML = FAQ.map(
-    ([q, a], i) => `
-      <details class="faq" data-reveal data-d="${i * 60}">
-        <summary>${q}<i></i></summary>
-        <div class="faq__body"><div><p>${a}</p></div></div>
-      </details>`,
-  ).join('');
+const nomination = () => election.questions[0];
+const candidateById = (id) => nomination().candidates.find((c) => c.id === id);
+
+function setLead(html) {
+  const lead = document.getElementById('hero-lead');
+  lead.classList.remove('lead-sk');
+  lead.innerHTML = html;
 }
+
+function render(html) {
+  root.innerHTML = `<div class="swap-in">${html}</div>`;
+  initReveal(root);
+}
+
+// ---------- таймер до окончания ----------
 
 function countdown(target, offset) {
   const box = document.getElementById('hero-countdown');
@@ -78,65 +77,188 @@ function countdown(target, offset) {
   setInterval(tick, 1000);
 }
 
-function renderNoElection() {
-  document.getElementById('hero-status').innerHTML = statusBadge('none');
-  document.getElementById('hero-lead').classList.remove('lead-sk');
-  document.getElementById('hero-lead').innerHTML =
-    'Голосование ещё не началось. Как только оргкомитет его откроет, здесь появятся номинации и кнопка «Проголосовать». Следите за новостями в группе конкурса.';
-  document.getElementById('hero-actions').innerHTML = `
-    <a class="btn btn--primary btn--lg" href="${VK_URL}" target="_blank" rel="noopener">${icons.vk} Группа ВКонтакте</a>
-    <a class="btn btn--glass btn--lg" href="#how">Как устроено голосование</a>`;
+// ---------- состояния страницы ----------
+
+function showMessage(icon, title, text, actions = '') {
+  bar.hidden = true;
+  render(`
+    <div class="card card--pad empty">
+      <div class="empty__icon">${icon}</div>
+      <h2>${title}</h2>
+      <p>${text}</p>
+      ${actions ? `<div class="actions">${actions}</div>` : ''}
+    </div>`);
 }
 
-function renderElection(e, serverTime) {
-  document.getElementById('hero-status').innerHTML = statusBadge(e.status);
-  const lead = document.getElementById('hero-lead');
-  lead.classList.remove('lead-sk');
-  lead.innerHTML = `<b class="grad-text">${escapeHtml(e.title)}</b>${e.description ? `<br>${escapeHtml(e.description)}` : ''}`;
+const vkButton = `<a class="btn btn--primary btn--lg" href="${VK_URL}" target="_blank" rel="noopener">${icons.vk} Группа конкурса ВКонтакте</a>`;
 
-  const actions = document.getElementById('hero-actions');
-  if (e.status === 'active') {
-    actions.innerHTML = `
-      <a class="btn btn--brand btn--lg" href="/vote">Проголосовать ${icons.arrow}</a>
-      <a class="btn btn--glass btn--lg" href="/verify">Проверить голос</a>`;
-    if (e.endsAt) countdown(e.endsAt, Date.parse(serverTime) - Date.now());
-  } else {
-    actions.innerHTML = `
-      <a class="btn btn--brand btn--lg" href="/results">Смотреть итоги ${icons.arrow}</a>
-      <a class="btn btn--glass btn--lg" href="/verify">Проверить голос</a>`;
+function showThanks(fresh) {
+  const voted = store.get(votedKey(election.id));
+  const name = voted?.name ? `за <b class="text">${escapeHtml(voted.name)}</b> ` : '';
+  bar.hidden = true;
+  render(`
+    <div class="card card--pad center thanks">
+      <div class="success-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
+      <h2>${fresh ? 'Спасибо! Ваш голос учтён' : 'Вы уже проголосовали'}</h2>
+      <p class="muted top-gap-sm">${fresh ? `Ваш голос ${name}засчитан.` : `Ваш голос ${name}уже засчитан — проголосовать можно только один раз.`} Итоги объявят организаторы в группе конкурса.</p>
+      <div class="actions">${vkButton}</div>
+    </div>`);
+  if (fresh) confetti();
+}
+
+function candidateCard(c, i) {
+  const photo = c.photo
+    ? `<img src="${escapeHtml(c.photo)}" alt="" loading="lazy">`
+    : `<span class="candidate__initials">${escapeHtml(initials(c.name))}</span>`;
+  return `
+    <label class="candidate" data-reveal data-d="${Math.min(i * 60, 480)}">
+      <input type="radio" name="candidate" value="${escapeHtml(c.id)}" ${selected === c.id ? 'checked' : ''}>
+      <span class="candidate__photo">${photo}<span class="candidate__check">${icons.check}</span></span>
+      <span class="candidate__body">
+        <span class="candidate__name">${escapeHtml(c.name)}</span>
+        ${c.description ? `<span class="candidate__desc">${escapeHtml(c.description)}</span>` : ''}
+      </span>
+    </label>`;
+}
+
+function updateBar() {
+  const c = selected && candidateById(selected);
+  bar.hidden = !c;
+  if (!c) return;
+  barChoice.innerHTML = `<span class="muted small">Ваш выбор</span><b>${escapeHtml(c.name)}</b>`;
+  voteButton.innerHTML = me.user ? `Проголосовать ${icons.arrow}` : `${icons.vk} Войти и проголосовать`;
+}
+
+function showCandidates() {
+  const failed = new URLSearchParams(location.search).get('auth') === 'failed';
+  const loginLine = me.user
+    ? `<p class="small muted">Вы вошли через ВКонтакте${me.user.name ? ` как <b class="text">${escapeHtml(me.user.name)}</b>` : ''} · <a class="link" href="/auth/logout">Выйти</a></p>`
+    : `<p class="small muted">Выберите участника. Чтобы проголосовать, нужно войти через ВКонтакте — один аккаунт, один голос.</p>`;
+  render(`
+    <div class="vote-head">
+      <h2>За кого голосуете?</h2>
+      ${loginLine}
+    </div>
+    ${failed ? note('danger', 'Не удалось войти', 'Вход через ВКонтакте не завершился. Попробуйте ещё раз.') : ''}
+    ${!me.vkConfigured && !me.devLogin ? note('warning', 'Голосование скоро откроется', 'Вход через ВКонтакте ещё настраивается. Загляните чуть позже.') : ''}
+    <form class="candidates" id="candidates">${nomination().candidates.map(candidateCard).join('')}</form>`);
+  document.getElementById('candidates').addEventListener('change', (e) => {
+    selected = e.target.value;
+    updateBar();
+  });
+  updateBar();
+}
+
+// ---------- голосование ----------
+
+function login() {
+  try {
+    sessionStorage.setItem(CHOICE_KEY, JSON.stringify({ election: election.id, candidate: selected }));
+  } catch {
+    /* ignore */
   }
-
-  const candidates = e.questions.reduce((n, q) => n + q.candidates.length, 0);
-  document.getElementById('stats-wrap').hidden = false;
-  countUp(document.getElementById('stat-cast'), e.stats.ballotsCast);
-  countUp(document.getElementById('stat-issued'), e.stats.ballotsIssued);
-  countUp(document.getElementById('stat-noms'), e.questions.length);
-  countUp(document.getElementById('stat-cands'), candidates);
-
-  document.getElementById('nominations-section').hidden = false;
-  document.getElementById('nominations').innerHTML = e.questions
-    .map(
-      (q, i) => `
-      <div class="card card--hover spot" data-reveal data-d="${i * 80}">
-        <div class="eyebrow">Номинация ${i + 1} · ${q.candidates.length} ${plural(q.candidates.length, 'участник', 'участника', 'участников')}</div>
-        <h3>${escapeHtml(q.title)}</h3>
-        ${q.description ? `<p>${escapeHtml(q.description)}</p>` : ''}
-        <div class="nominee-list">
-          ${q.candidates.map((c) => `<span class="chip"><span class="avatar">${escapeHtml(initials(c.name))}</span>${escapeHtml(c.name)}</span>`).join('')}
-        </div>
-      </div>`,
-    )
-    .join('');
-  if (e.status === 'finished') document.getElementById('nom-title').textContent = 'Номинации голосования';
-  initReveal();
+  location.href = me.vkConfigured ? '/auth/vk/start?return=/%3Fvote%3D1' : '/auth/dev?return=/%3Fvote%3D1';
 }
+
+// Голос отправляется анонимно: сначала подпись, затем зашифрованный выбор.
+async function sendVote(pending) {
+  const keys = await loadPublicKeys(election.publicKeys);
+  if (!pending) {
+    const token = bytesToHex(randomBytes(32));
+    const blind = await blindToken(token, keys.rsaPub);
+    const ballot = await encryptBallot(election.id, { [nomination().id]: selected }, keys.electionKey);
+    pending = { token, blinded: blind.blinded, r: blind.r, ballot, candidate: selected };
+    store.set(pendingKey(election.id), pending);
+  }
+  if (!pending.signature) {
+    const res = await api(`/api/elections/${election.id}/sign`, { method: 'POST', body: { blinded: pending.blinded } });
+    const signature = unblindSignature(res.blindSignature, pending.r, keys.rsaPub);
+    if (!(await verifyTokenSignature(pending.token, signature, keys.rsaPub))) throw new Error('Не удалось отправить голос. Попробуйте ещё раз');
+    pending = { ...pending, signature };
+    store.set(pendingKey(election.id), pending);
+  }
+  await api(`/api/elections/${election.id}/ballot`, {
+    method: 'POST',
+    body: { token: pending.token, signature: pending.signature, ballot: pending.ballot },
+  });
+  store.remove(pendingKey(election.id));
+  store.set(votedKey(election.id), { name: candidateById(pending.candidate)?.name ?? '' });
+}
+
+async function vote() {
+  const c = candidateById(selected);
+  if (!c) return;
+  if (!me.user) return login();
+  const ok = await confirmDialog({
+    title: `Голосуете за ${c.name}?`,
+    text: 'Проголосовать можно только один раз, изменить выбор потом не получится.',
+    ok: 'Да, проголосовать',
+  });
+  if (!ok) return;
+  try {
+    await withLoading(voteButton, () => sendVote(null));
+    showThanks(true);
+  } catch (err) {
+    if (err.status === 409) return showThanks(false);
+    toast(err.message);
+  }
+}
+
+voteButton.addEventListener('click', vote);
+
+// ---------- запуск ----------
 
 async function main() {
-  renderStatic();
-  initReveal();
-  const { election, serverTime } = await api('/api/current');
-  if (!election) renderNoElection();
-  else renderElection(election, serverTime);
+  const [{ election: current, serverTime }, meRes] = await Promise.all([api('/api/current'), api('/api/me')]);
+  me = meRes;
+
+  if (!current) {
+    setLead('Голосование ещё не началось. Следите за новостями в группе конкурса.');
+    return showMessage(icons.clock, 'Голосование скоро начнётся', 'Как только организаторы откроют голосование, здесь появятся участники.', vkButton);
+  }
+
+  election = current;
+  setLead(`<b class="grad-text">${escapeHtml(election.title)}</b>${election.description ? `<br>${escapeHtml(election.description)}` : ''}`);
+
+  if (election.status === 'finished') {
+    return showMessage(icons.check, 'Голосование завершено', 'Спасибо всем, кто голосовал! Итоги объявят организаторы в группе конкурса.', vkButton);
+  }
+  if (election.endsAt) countdown(election.endsAt, Date.parse(serverTime) - Date.now());
+
+  session = await api(`/api/elections/${election.id}/session`);
+  const pending = store.get(pendingKey(election.id));
+
+  // Отправка прервалась (закрыли страницу, пропала связь) — тихо досылаем.
+  if (session.loggedIn && pending?.ballot && (!session.ballotIssued || session.blinded === pending.blinded)) {
+    try {
+      selected = pending.candidate;
+      await sendVote(pending);
+      return showThanks(true);
+    } catch {
+      store.remove(pendingKey(election.id));
+    }
+  }
+  if (session.ballotIssued) return showThanks(false);
+
+  // Вернулись после входа через ВКонтакте — продолжаем с выбранным участником.
+  let saved = null;
+  try {
+    saved = JSON.parse(sessionStorage.getItem(CHOICE_KEY));
+    sessionStorage.removeItem(CHOICE_KEY);
+  } catch {
+    /* ignore */
+  }
+  if (saved?.election === election.id && candidateById(saved.candidate)) selected = saved.candidate;
+  showCandidates();
+  history.replaceState(null, '', '/');
+  if (selected && me.user && saved) {
+    document.getElementById('vote').scrollIntoView({ behavior: 'smooth' });
+    vote();
+  }
 }
 
-main().catch(() => renderNoElection());
+main().catch((err) => {
+  showMessage(icons.alert, 'Не удалось загрузить страницу', escapeHtml(err.message), '<button class="btn btn--primary" id="reload">Обновить</button>');
+  document.getElementById('reload')?.addEventListener('click', () => location.reload());
+});
+
