@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import crypto from 'node:crypto';
 
 import { createApp } from '../server/app.js';
 import {
@@ -28,9 +27,10 @@ before(async () => {
   app = await createApp({
     dataDir,
     adminToken: ADMIN,
-    smsSender: fakeSms,
-    powDifficulty: 6,
-    smsResendAfter: 0,
+    devLogin: true,
+    vkClientId: '51234567',
+    publicUrl: 'https://vote.example',
+    fetch: fakeVk,
   });
   await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${app.server.address().port}`;
@@ -41,21 +41,22 @@ after(async () => {
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
-// Поддельный SMS.RU: запоминает отправленные коды.
-const sms = [];
-async function fakeSms(phone, text, ip) {
-  sms.push({ phone, code: text.match(/\d{6}/)[0], ip });
-}
-const lastCode = (phone) => sms.filter((m) => m.phone === phone).at(-1)?.code;
-
-// Решение «невидимой капчи» (в тестах сложность маленькая).
-async function solve(api) {
-  const { data } = await api('GET', '/api/auth/challenge');
-  for (let n = 0; ; n++) {
-    const h = crypto.createHash('sha256').update(`${data.challenge}:${n}`).digest();
-    const zeros = h[0] === 0 ? 8 + Math.clz32(h[1]) - 24 : Math.clz32(h[0]) - 24;
-    if (zeros >= data.difficulty) return { challenge: data.challenge, nonce: String(n) };
+// Поддельный VK ID: принимает только правильный код и code_verifier.
+const vkCalls = [];
+async function fakeVk(url, init) {
+  const params = Object.fromEntries(new URLSearchParams(String(init.body)));
+  vkCalls.push({ url, params });
+  const json = (status, data) => ({ ok: status === 200, status, json: async () => data });
+  if (url === 'https://id.vk.ru/oauth2/auth') {
+    if (params.code !== 'good-code' || !params.code_verifier || params.device_id !== 'dev-1') {
+      return json(400, { error: 'invalid_grant' });
+    }
+    return json(200, { access_token: 'token-1', user_id: 777 });
   }
+  if (url === 'https://id.vk.ru/oauth2/user_info' && params.access_token === 'token-1') {
+    return json(200, { user: { user_id: '777', first_name: 'Анна', last_name: 'С' } });
+  }
+  return json(401, { error: 'invalid_token' });
 }
 
 let nextUid = 1000;
@@ -85,20 +86,11 @@ function client() {
   return fn;
 }
 
-// Вход по номеру телефона: капча → SMS → код.
-async function login(api, phone) {
-  const sent = await api('POST', '/api/auth/send', { phone, ...(await solve(api)) });
-  if (sent.status !== 200) return sent;
-  return api('POST', '/api/auth/verify', { phone, code: lastCode(phone.replace(/\D/g, '').replace(/^8/, '7')) });
-}
-
-// «Человек» — браузер, подтвердивший свой номер.
-async function voter(n = nextUid++) {
+// «Человек» — браузер, вошедший через (тестовый) аккаунт ВКонтакте.
+async function voter(uid = nextUid++) {
   const api = client();
-  const phone = `7900${String(n).padStart(7, '0')}`;
-  const res = await login(api, phone);
-  assert.equal(res.status, 200, JSON.stringify(res.data));
-  api.phone = phone;
+  await api('GET', `/auth/dev?uid=${uid}`);
+  api.uid = uid;
   return api;
 }
 
@@ -238,59 +230,68 @@ test('полный цикл: создать, запустить, проголо�
   assert.equal(list.data.elections.length, 2);
 });
 
-test('без подтверждённого номера бюллетень не выдаётся, один номер — один голос', async () => {
+test('без входа через ВКонтакте бюллетень не выдаётся, один аккаунт — один голос', async () => {
   const id = (await asAdmin('POST', '/api/admin/elections', SAMPLE)).data.election.id;
   const active = (await asAdmin('GET', '/api/admin/elections')).data.elections.find((e) => e.status === 'active');
   if (active) await asAdmin('POST', `/api/admin/elections/${active.id}/finish`);
   await asAdmin('POST', `/api/admin/elections/${id}/start`);
 
+  // Не вошёл — голосовать нельзя.
   const guest = client();
   assert.equal((await guest('GET', `/api/elections/${id}/session`)).data.loggedIn, false);
   assert.equal((await vote(guest, id, { q1: 'c1', q2: 'c1' })).signed.status, 401);
 
-  // Тот же номер из другого браузера, инкогнито или через VPN — отказ.
+  // Тот же аккаунт ВКонтакте из другого браузера, инкогнито или через VPN — отказ.
   const phone = await voter(4242);
   assert.equal((await vote(phone, id, { q1: 'c1', q2: 'c1' })).cast.status, 200);
   const laptop = await voter(4242);
   assert.equal((await laptop('GET', `/api/elections/${id}/session`)).data.ballotIssued, true);
   assert.equal((await vote(laptop, id, { q1: 'c2', q2: 'c2' })).signed.status, 409);
 
-  // Другие номера голосуют спокойно — даже с одинаковых телефонов.
+  // Другие аккаунты голосуют спокойно — даже с одинаковых телефонов.
   assert.equal((await vote(await voter(4343), id, { q1: 'c3', q2: 'c2' })).cast.status, 200);
 
-  await phone('POST', '/api/auth/logout');
+  // Выход завершает сессию.
+  await phone('GET', '/auth/logout');
   assert.equal((await phone('GET', `/api/elections/${id}/session`)).data.loggedIn, false);
 });
 
-test('SMS-вход: капча, лимиты, неверный код, только мобильные номера РФ', async () => {
+test('вход через VK ID: PKCE, проверка state, обмен кода на токен', async () => {
   const b = client();
-  // Без решённой капчи SMS не отправляется.
-  const noPow = await b('POST', '/api/auth/send', { phone: '79001112233', challenge: 'x.y.z', nonce: '1' });
-  assert.equal(noPow.status, 400);
-  // Капча одноразовая.
-  const pow = await solve(b);
-  assert.equal((await b('POST', '/api/auth/send', { phone: '+7 (900) 111-22-33', ...pow })).status, 200);
-  assert.equal((await b('POST', '/api/auth/send', { phone: '79001112244', ...pow })).status, 400);
-  // Не больше 5 кодов в день на номер.
-  for (let i = 0; i < 4; i++) {
-    assert.equal((await b('POST', '/api/auth/send', { phone: '89001112233', ...(await solve(b)) })).status, 200);
-  }
-  const tooMany = await b('POST', '/api/auth/send', { phone: '79001112233', ...(await solve(b)) });
-  assert.equal(tooMany.status, 429);
-  // Не мобильный / не российский номер.
-  assert.equal((await b('POST', '/api/auth/send', { phone: '74951234567', ...(await solve(b)) })).status, 400);
-  assert.equal((await b('POST', '/api/auth/send', { phone: '380501234567', ...(await solve(b)) })).status, 400);
-  // Неверный код — отказ, после 5 попыток код сгорает.
-  for (let i = 0; i < 5; i++) {
-    assert.equal((await b('POST', '/api/auth/verify', { phone: '79001112233', code: '000000' })).status, 400);
-  }
-  const burned = await b('POST', '/api/auth/verify', { phone: '79001112233', code: lastCode('79001112233') });
-  assert.equal(burned.status, 400);
-  assert.equal((await b('GET', '/api/me')).data.user, null);
-  // SMS.RU получает IP посетителя.
-  assert.ok(sms.at(-1).ip);
-  // Номер нигде не хранится в открытом виде: в cookie — только маска.
+  const start = await b('GET', '/auth/vk/start?return=/vote');
+  assert.equal(start.status, 302);
+  const auth = new URL(start.location);
+  assert.equal(auth.origin + auth.pathname, 'https://id.vk.ru/authorize');
+  assert.equal(auth.searchParams.get('client_id'), '51234567');
+  assert.equal(auth.searchParams.get('redirect_uri'), 'https://vote.example/auth/vk/callback');
+  assert.equal(auth.searchParams.get('code_challenge_method'), 'S256');
+  const state = auth.searchParams.get('state');
+  assert.ok(state.length >= 32);
+
+  // Подменённый state отклоняется.
+  const bad = await b('GET', `/auth/vk/callback?code=good-code&state=wrong&device_id=dev-1`);
+  assert.equal(bad.location, '/vote?auth=failed');
+
+  const again = new URL((await b('GET', '/auth/vk/start?return=/vote')).location).searchParams.get('state');
+  const ok = await b('GET', `/auth/vk/callback?code=good-code&state=${again}&device_id=dev-1`);
+  assert.equal(ok.status, 302);
+  assert.equal(ok.location, '/vote');
+  const exchange = vkCalls.find((c) => c.url.endsWith('/oauth2/auth'));
+  assert.equal(exchange.params.grant_type, 'authorization_code');
+  assert.equal(exchange.params.redirect_uri, 'https://vote.example/auth/vk/callback');
+
+  const me = await b('GET', '/api/me');
+  assert.equal(me.data.user.name, 'Анна С');
+  assert.equal(me.data.vkConfigured, true);
+
+  // Неверный код — вход не выполняется.
   const c = client();
-  await login(c, '79005556677');
-  assert.equal((await c('GET', '/api/me')).data.user.phone, '+7 900 •••-••-77');
+  const st = new URL((await c('GET', '/auth/vk/start')).location).searchParams.get('state');
+  const fail = await c('GET', `/auth/vk/callback?code=bad&state=${st}&device_id=dev-1`);
+  assert.equal(fail.location, '/vote?auth=failed');
+  assert.equal((await c('GET', '/api/me')).data.user, null);
+
+  // Возврат только на свои страницы.
+  const evil = new URL((await client()('GET', '/auth/vk/start?return=//evil.example')).location);
+  assert.ok(evil.searchParams.get('state'));
 });
