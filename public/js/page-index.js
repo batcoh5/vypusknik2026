@@ -13,6 +13,8 @@ import {
   pendingKey,
   votedKey,
   confetti,
+  fireworks,
+  fireworksSound,
   confirmDialog,
   withLoading,
   toast,
@@ -92,7 +94,7 @@ function showMessage(icon, title, text, actions = '') {
 
 const vkButton = `<a class="btn btn--primary btn--lg" href="${VK_URL}" target="_blank" rel="noopener">${icons.vk} Группа конкурса ВКонтакте</a>`;
 
-function showThanks(fresh) {
+function showThanks(fresh, sound = null) {
   const voted = store.get(votedKey(election.id));
   const name = voted?.name ? `за <b class="text">${escapeHtml(voted.name)}</b> ` : '';
   bar.hidden = true;
@@ -103,7 +105,11 @@ function showThanks(fresh) {
       <p class="muted top-gap-sm">${fresh ? `Ваш голос ${name}засчитан.` : `Ваш голос ${name}уже засчитан — проголосовать можно только один раз.`} Итоги объявят организаторы в группе конкурса.</p>
       <div class="actions">${vkButton}</div>
     </div>`);
-  if (fresh) confetti();
+  if (fresh) {
+    fireworks(7000, sound);
+    confetti();
+    root.querySelector('.thanks')?.classList.add('thanks--celebrate');
+  }
 }
 
 function candidateCard(c, i) {
@@ -189,16 +195,20 @@ async function vote() {
   const c = candidateById(selected);
   if (!c) return;
   if (!me.user) return login();
+  // Звук включаем прямо по нажатию — иначе браузер его заблокирует.
+  const sound = fireworksSound();
   const ok = await confirmDialog({
     title: `Голосуете за ${c.name}?`,
     text: 'Проголосовать можно только один раз, изменить выбор потом не получится.',
     ok: 'Да, проголосовать',
   });
-  if (!ok) return;
+  if (!ok) return sound?.close();
+  sound?.resume();
   try {
     await withLoading(voteButton, () => sendVote(null));
-    showThanks(true);
+    showThanks(true, sound);
   } catch (err) {
+    sound?.close();
     if (err.status === 409) return showThanks(false);
     toast(err.message);
   }

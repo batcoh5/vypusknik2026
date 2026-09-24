@@ -50,6 +50,13 @@ export function openDb(dataDir) {
     );
   `);
 
+  // Счётчик тестовых голосов (симуляция в режиме DEV_TOOLS) — для баз, созданных раньше.
+  try {
+    db.exec('ALTER TABLE elections ADD COLUMN simulated INTEGER NOT NULL DEFAULT 0');
+  } catch {
+    /* колонка уже есть */
+  }
+
   const q = {
     election: db.prepare('SELECT * FROM elections WHERE id = ?'),
     elections: db.prepare('SELECT * FROM elections ORDER BY created_at DESC'),
@@ -62,6 +69,7 @@ export function openDb(dataDir) {
     startElection: db.prepare("UPDATE elections SET status = 'active', started_at = ? WHERE id = ?"),
     finishElection: db.prepare("UPDATE elections SET status = 'finished', finished_at = ?, tally = ? WHERE id = ?"),
     deleteElection: db.prepare('DELETE FROM elections WHERE id = ?'),
+    addSimulated: db.prepare('UPDATE elections SET simulated = simulated + ? WHERE id = ?'),
 
     voter: db.prepare('SELECT * FROM voter_ballots WHERE election_id = ? AND identity = ?'),
     votersByIp: db.prepare('SELECT COUNT(*) AS n FROM voter_ballots WHERE election_id = ? AND ip = ?'),
@@ -94,6 +102,7 @@ export function openDb(dataDir) {
       finishedAt: r.finished_at,
       keys: JSON.parse(r.keys),
       tally: r.tally ? JSON.parse(r.tally) : null,
+      simulated: r.simulated ?? 0,
     };
 
   const toBlock = (r) =>
@@ -133,6 +142,7 @@ export function openDb(dataDir) {
     startElection: (id, at) => q.startElection.run(at, id),
     finishElection: (id, at, tally) => q.finishElection.run(at, JSON.stringify(tally), id),
     deleteElection: (id) => q.deleteElection.run(id),
+    addSimulated: (id, n) => q.addSimulated.run(n, id),
 
     getVoter: (eid, identity) => q.voter.get(eid, identity),
     countVotersByIp: (eid, ip) => q.votersByIp.get(eid, ip).n,
