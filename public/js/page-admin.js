@@ -1,6 +1,5 @@
 import {
   renderChrome,
-  setFooterStatus,
   escapeHtml,
   formatDate,
   formatNumber,
@@ -137,7 +136,6 @@ async function showList() {
   }
   const { elections } = data;
   const active = elections.find((e) => e.status === 'active');
-  setFooterStatus(active ? 'active' : elections.some((e) => e.status === 'finished') ? 'finished' : 'none');
 
   render(`
     <div class="election-card__head">
@@ -157,7 +155,7 @@ async function showList() {
           : `<div class="card empty"><div class="empty__icon">${icons.hat}</div><h3>Голосований пока нет</h3><p>Создайте первое голосование: добавьте номинации и участников, затем запустите его.</p></div>`
       }
     </div>
-    ${note('info', 'Как это работает', 'Создайте голосование → проверьте номинации → запустите. Одновременно может идти только одно голосование. После завершения публикуются итоги и ключ расшифровки. Удалённое голосование исчезает с сайта вместе с реестром — после этого можно создать новое. В каждом голосовании человек голосует только один раз.')}
+    ${note('info', 'Как это работает', 'Создайте голосование → проверьте номинации → запустите. Одновременно может идти только одно голосование. После завершения публикуются итоги и ключ расшифровки. Удалённое голосование исчезает с сайта вместе с реестром — после этого можно создать новое. Голосуют через вход ВКонтакте: один аккаунт — один голос в каждом голосовании.')}
   `);
 
   document.getElementById('create').addEventListener('click', () => showEditor());
@@ -292,6 +290,7 @@ function showEditor(e = null) {
         <input class="input" type="datetime-local" id="e-ends" value="${toLocalInput(e?.endsAt)}">
         <p class="small subtle top-gap-xs">Если не указать, голосование идёт, пока вы не завершите его вручную.</p>
       </div>
+
       <h3 class="top-gap">Номинации</h3>
       <div class="top-gap-sm" id="questions">${questions.map(questionBlock).join('')}</div>
       <button type="button" class="btn btn--glass top-gap-sm" id="add-q">${icons.plus} Добавить номинацию</button>

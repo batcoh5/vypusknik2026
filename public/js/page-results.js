@@ -1,11 +1,9 @@
 import {
   api,
   renderChrome,
-  setFooterStatus,
   escapeHtml,
   formatDate,
   formatNumber,
-  statusBadge,
   fetchAllBlocks,
   plural,
   countUp,
@@ -43,7 +41,7 @@ function questionsHtml(election, tally) {
             const lead = n === max && n > 0;
             return `<div class="result-row ${lead ? 'leader' : ''}">
               <div class="result-row__head">
-                <span>${escapeHtml(c.name)}${lead ? `<span class="crown">${icons.crown} лидер</span>` : ''}${c.description ? ` <span class="small muted">${escapeHtml(c.description)}</span>` : ''}</span>
+                <span class="result-row__name"><span>${escapeHtml(c.name)}</span>${c.description ? `<span class="small muted">${escapeHtml(c.description)}</span>` : ''}${lead ? `<span class="winner">${icons.crown} Победитель</span>` : ''}</span>
                 <span class="result-row__value"><b data-count="${n}">0</b> · ${p}%</span>
               </div>
               <div class="bar"><div class="bar__fill" data-width="${p}"></div></div>
@@ -100,11 +98,10 @@ async function recount(btn, election) {
 
 async function main() {
   const { election } = await api('/api/current');
-  setFooterStatus(election?.status ?? 'none');
   const statusBox = document.getElementById('results-status');
 
   if (!election) {
-    statusBox.innerHTML = statusBadge('none');
+    statusBox.textContent = 'Итоги';
     root.innerHTML = `
       <div class="card card--pad empty swap-in">
         <div class="empty__icon">${icons.chart}</div>
@@ -115,7 +112,7 @@ async function main() {
     return;
   }
 
-  statusBox.innerHTML = `${statusBadge(election.status)}<span>${escapeHtml(election.title)}</span>`;
+  statusBox.textContent = election.title;
   const { stats, tally } = election;
 
   if (!tally) {
@@ -152,7 +149,7 @@ async function main() {
         </div>
         <button class="btn btn--brand" id="recount">${icons.shield} Пересчитать самостоятельно</button>
       </div>
-      <div class="chain" id="recount-chain"></div>
+      <div class="progress" id="recount-chain" hidden><div class="progress__fill"></div></div>
       <div id="recount-report"></div>
     </section>`;
   countUp(document.getElementById('s-total'), tally.total);

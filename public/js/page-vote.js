@@ -1,8 +1,6 @@
 import {
   api,
   renderChrome,
-  setFooterStatus,
-  statusBadge,
   escapeHtml,
   formatDate,
   initials,
@@ -31,12 +29,13 @@ import {
 
 renderChrome();
 
-const STEPS = ['Подтверждение', 'Бюллетень', 'Проверка', 'Отправка', 'Квитанция'];
+const STEPS = ['Вход', 'Бюллетень', 'Проверка', 'Отправка', 'Квитанция'];
 const stepBox = document.getElementById('step');
 const stepper = document.getElementById('stepper');
 
 let election;
 let keys;
+let me;
 const choices = {};
 
 document.getElementById('aside-checks').innerHTML = [
@@ -67,14 +66,31 @@ function showMessage(kind, title, text, actions = '') {
   render(`${note(kind, title, text)}${actions ? `<div class="actions">${actions}</div>` : ''}`);
 }
 
-// ---------- шаг 1: подтверждение ----------
+// ---------- шаг 1: вход через ВКонтакте ----------
+
+function stepLogin() {
+  setStep(0);
+  const failed = new URLSearchParams(location.search).get('auth') === 'failed';
+  const loginButton = me.vkConfigured
+    ? `<a class="btn btn--vk btn--lg" href="/auth/vk/start?return=/vote">${icons.vk} Войти через ВКонтакте</a>`
+    : me.devLogin
+      ? `<a class="btn btn--primary btn--lg" href="/auth/dev?return=/vote">Тестовый вход (без ВКонтакте)</a>`
+      : '';
+  render(`
+    <h2>Войдите, чтобы проголосовать</h2>
+    <p class="muted top-gap-sm">Голосование проходит ${election.endsAt ? `до ${formatDate(election.endsAt)} (время новосибирское)` : 'до объявления итогов оргкомитетом'}.</p>
+    ${failed ? note('danger', 'Не удалось войти', 'Вход через ВКонтакте не завершился. Попробуйте ещё раз.') : ''}
+    ${note('info', 'Один аккаунт ВКонтакте — один голос', 'Вход нужен только для того, чтобы никто не проголосовал дважды. Сайт не узнаёт, за кого вы голосуете: бюллетень шифруется и заверяется слепой подписью, поэтому связать голос с аккаунтом невозможно.', icons.shield)}
+    ${loginButton ? `<div class="actions">${loginButton}</div>` : note('warning', 'Вход ещё не настроен', 'Организаторы пока не подключили вход через ВКонтакте. Загляните чуть позже.')}`);
+}
+
+// ---------- шаг 1б: подтверждение ----------
 
 function stepAuth() {
   setStep(0);
   render(`
     <h2>Подтверждение участника</h2>
-    <p class="muted top-gap-sm">Голосование проходит ${election.endsAt ? `до ${formatDate(election.endsAt)} (время новосибирское)` : 'до объявления итогов оргкомитетом'}.</p>
-    ${note('info', 'Один голос на устройство', 'Сейчас бюллетень выдаётся один раз на устройство. Скоро появится подтверждение по номеру телефона с кодом из SMS.', icons.shield)}
+    <p class="muted top-gap-sm">Вы вошли${me.user?.name ? ` как <b class="text">${escapeHtml(me.user.name)}</b>` : ''} · <a class="link" href="/auth/logout">Выйти</a></p>
     <div class="top-gap-sm">
       <label class="check">
         <input type="checkbox" id="agree">
@@ -332,8 +348,7 @@ function stepReceipt(receipt, fresh = false) {
 async function main() {
   const { election: current } = await api('/api/current');
   if (!current || current.status !== 'active') {
-    setFooterStatus(current?.status ?? 'none');
-    document.getElementById('vote-status').innerHTML = statusBadge(current?.status ?? 'none');
+    document.getElementById('vote-status').textContent = 'Голосование';
     if (current?.status === 'finished') {
       document.getElementById('vote-title').textContent = current.title;
       return showMessage('info', 'Голосование завершено', 'Приём голосов окончен, итоги уже подведены.', `<a class="btn btn--brand" href="/results">Смотреть итоги ${icons.arrow}</a>`);
@@ -347,15 +362,15 @@ async function main() {
   }
 
   election = current;
-  setFooterStatus('active');
-  document.getElementById('vote-status').innerHTML = statusBadge('active');
+  document.getElementById('vote-status').textContent = 'Электронный бюллетень';
   document.getElementById('vote-title').textContent = election.title;
   keys = await loadPublicKeys(election.publicKeys);
+  me = await api('/api/me');
   const session = await api(`/api/elections/${election.id}/session`);
   const receipt = store.get(receiptKey(election.id));
   const pending = store.get(pendingKey(election.id));
 
-  if (receipt) return stepReceipt(receipt);
+  if (!session.loggedIn) return stepLogin();
 
   if (pending?.ballot) {
     if (!session.ballotIssued || session.blinded === pending.blinded) {
@@ -370,10 +385,12 @@ async function main() {
   }
 
   if (session.ballotIssued) {
+    // Квитанция в браузере показывается, только если голосовал именно этот аккаунт.
+    if (receipt) return stepReceipt(receipt);
     return showMessage(
       'warning',
-      'Бюллетень уже выдан',
-      'На этом устройстве бюллетень в этом голосовании уже был получен. Проголосовать можно только один раз.',
+      'Вы уже проголосовали',
+      'С этого аккаунта ВКонтакте уже проголосовали в этом голосовании. Проголосовать можно только один раз.',
       `<a class="btn btn--primary" href="/verify">Проверить голос</a><a class="btn btn--glass" href="/ledger">Открыть реестр</a>`,
     );
   }

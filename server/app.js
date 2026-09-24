@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import { openDb } from './db.js';
 import { loadSecret, generateElectionKeys, electionCrypto } from './keys.js';
-import { createDeviceIdentity } from './identity.js';
+import { createVkIdentity } from './identity.js';
 import {
   GENESIS_HASH,
   computeBlockHash,
@@ -138,7 +138,14 @@ export async function createApp(options = {}) {
 
   const secret = loadSecret(dataDir);
   const db = openDb(dataDir);
-  const identity = createDeviceIdentity(secret, { secureCookies: options.secureCookies ?? false });
+  const identity = createVkIdentity(secret, {
+    vkClientId: options.vkClientId,
+    vkHost: options.vkHost,
+    publicUrl: options.publicUrl,
+    secureCookies: options.secureCookies ?? false,
+    devLogin: options.devLogin ?? false,
+    fetch: options.fetch,
+  });
   const maxPerIp = options.maxVotesPerIp ?? 0;
   const trustProxy = options.trustProxy ?? false;
   const adminToken = options.adminToken;
@@ -259,19 +266,26 @@ export async function createApp(options = {}) {
 
   route('GET', '/api/current', async () => {
     const e = db.activeElection() ?? db.lastFinishedElection();
-    return { election: e ? publicElection(e) : null, serverTime: now().toISOString(), identityProvider: identity.name };
+    return { election: e ? publicElection(e) : null, serverTime: now().toISOString() };
   });
+
+  // Кто вошёл: имя из ВКонтакте хранится только в cookie самого пользователя.
+  route('GET', '/api/me', async ({ req }) => ({
+    user: identity.user(req),
+    vkConfigured: identity.configured,
+    devLogin: identity.devLogin,
+  }));
 
   route('GET', '/api/elections/:id', async ({ params }) => ({
     election: publicElection(publicElectionById(params.id)),
     serverTime: now().toISOString(),
   }));
 
-  route('GET', '/api/elections/:id/session', async ({ req, res, params }) => {
+  route('GET', '/api/elections/:id/session', async ({ req, params }) => {
     const e = publicElectionById(params.id);
-    identity.ensure(req, res);
-    const voter = db.getVoter(e.id, identity.identify(req) ?? '');
-    return { status: e.status, ballotIssued: Boolean(voter), blinded: voter?.blinded ?? null };
+    const id = identity.identify(req);
+    const voter = id ? db.getVoter(e.id, id) : null;
+    return { status: e.status, loggedIn: Boolean(id), ballotIssued: Boolean(voter), blinded: voter?.blinded ?? null };
   });
 
   // Шаг 1: избиратель получает слепую подпись на свой анонимный токен.
@@ -279,7 +293,7 @@ export async function createApp(options = {}) {
     const e = activeElectionById(params.id);
     const c = cryptoFor(e);
     const id = identity.identify(req);
-    if (!id) throw new HttpError(401, 'no_session', 'Сессия не найдена. Обновите страницу');
+    if (!id) throw new HttpError(401, 'no_session', 'Войдите через ВКонтакте, чтобы проголосовать');
     const blinded = String(body.blinded ?? '').toLowerCase();
     if (!/^[0-9a-f]+$/.test(blinded) || blinded.length !== c.rsaPub.bytes * 2) {
       throw new HttpError(400, 'bad_request', 'Некорректный запрос');
@@ -290,7 +304,7 @@ export async function createApp(options = {}) {
       if (voter) {
         // Повтор того же запроса (например, оборвалась связь) — отдаём ту же подпись.
         if (voter.blinded === blinded) return { blindSignature: voter.blind_sig };
-        throw new HttpError(409, 'already_issued', 'Вы уже получили бюллетень в этом голосовании');
+        throw new HttpError(409, 'already_issued', 'С этого аккаунта ВКонтакте уже проголосовали в этом голосовании');
       }
       if (maxPerIp > 0 && db.countVotersByIp(e.id, ip) >= maxPerIp) {
         throw new HttpError(429, 'ip_limit', 'Превышено число бюллетеней для вашей сети');
@@ -491,6 +505,13 @@ export async function createApp(options = {}) {
   async function handle(req, res) {
     const url = new URL(req.url, 'http://localhost');
     try {
+      if (url.pathname.startsWith('/auth/') && req.method === 'GET') {
+        if (!apiLimiter(clientIp(req))) throw new HttpError(429, 'rate_limited', 'Слишком много запросов. Попробуйте через минуту');
+        if (url.pathname === '/auth/vk/start') return identity.start(req, res, url);
+        if (url.pathname === '/auth/vk/callback') return await identity.callback(req, res, url);
+        if (url.pathname === '/auth/logout') return identity.logout(req, res);
+        if (url.pathname === '/auth/dev' && identity.devLogin) return identity.dev(req, res, url);
+      }
       if (url.pathname.startsWith('/api/')) {
         if (!apiLimiter(clientIp(req))) {
           throw new HttpError(429, 'rate_limited', 'Слишком много запросов. Попробуйте через минуту');

@@ -1,17 +1,16 @@
 import {
   api,
   renderChrome,
-  setFooterStatus,
   escapeHtml,
   formatDate,
   store,
   shortHash,
-  statusBadge,
   icons,
   note,
   shake,
   withLoading,
   initials,
+  pruneDeletedElections,
 } from './common.js';
 import {
   loadPublicKeys,
@@ -25,9 +24,6 @@ import {
 } from './core.js';
 
 renderChrome();
-api('/api/current')
-  .then((r) => setFooterStatus(r.election?.status ?? 'none'))
-  .catch(() => setFooterStatus('none'));
 
 const form = document.getElementById('verify-form');
 const input = document.getElementById('receipt-input');
@@ -144,7 +140,7 @@ async function verify(hash, receipt = null) {
         <div>
           <h3>Данные блока</h3>
           <dl class="kv top-gap-sm">
-            <dt>Голосование</dt><dd>${statusBadge(election.status)}</dd>
+            <dt>Голосование</dt><dd>${escapeHtml(election.title)} · ${election.status === 'finished' ? 'завершено' : 'идёт'}</dd>
             <dt>Время записи</dt><dd>${formatDate(block.timestamp)}</dd>
             <dt>Хеш блока</dt><dd class="mono">${block.hash}</dd>
             <dt>Предыдущий</dt><dd class="mono">${shortHash(block.prevHash)}</dd>
@@ -182,6 +178,7 @@ document.getElementById('receipt-file').addEventListener('change', async (e) => 
   }
 });
 
+await pruneDeletedElections();
 const saved = savedReceipts();
 if (saved.length) {
   const box = document.getElementById('saved');
