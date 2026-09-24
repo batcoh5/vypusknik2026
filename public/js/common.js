@@ -70,10 +70,10 @@ export function renderChrome() {
           </div>
           <div>
             <h4>Организаторы</h4>
-            <ul>
-              <li>Администрация р.п. Краснообск</li>
-              <li>МБУ р.п. Краснообска «Дом культуры»</li>
-              <li>Молодёжный Краснообск</li>
+            <ul class="partners">
+              <li><span class="partner__logo"><img src="/img/partners/admin.png" alt="" width="84" height="128"></span>Администрация р.п. Краснообск</li>
+              <li><span class="partner__logo"><img src="/img/partners/dk.png" alt="" width="126" height="128"></span>МБУ р.п. Краснообска «Дом культуры»</li>
+              <li><span class="partner__logo"><img src="/img/partners/molodezh.png" alt="" width="139" height="96"></span>Молодёжный Краснообск</li>
             </ul>
           </div>
         </div>
