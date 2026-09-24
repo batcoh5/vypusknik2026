@@ -330,10 +330,10 @@ test('фото участников и итоги в Excel', async () => {
   fs.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
   // Распаковываем лист и проверяем формулу «голоса / всего × 160» с округлением.
   const sheet = execFileSync('python3', ['-c', `import zipfile,sys;print(zipfile.ZipFile(sys.argv[1]).read('xl/worksheets/sheet1.xml').decode())`, file]).toString();
-  assert.match(sheet, /<f>IF\(\$C\$7=0,0,ROUND\(C4\/\$C\$7\*160,0\)\)<\/f><v>120<\/v>/);
-  // Победитель — второй участник: в строке остаётся его номер 2, а не место 1.
-  assert.match(sheet, /<c r="A4"><v>2<\/v><\/c>/);
-  assert.match(sheet, /<c r="A5"><v>1<\/v><\/c>/);
+  assert.match(sheet, /<f>IF\(\$C\$7=0,0,ROUND\(C5\/\$C\$7\*160,0\)\)<\/f><v>120<\/v>/);
+  // Порядок строк — как в голосовании, без сортировки по голосам: первый участник в первой строке, даже если он не победил.
+  assert.match(sheet, /<c r="A4"><v>1<\/v><\/c><c r="B4" t="inlineStr"><is><t xml:space="preserve">Анна<\/t>/);
+  assert.match(sheet, /<c r="A5"><v>2<\/v><\/c>/);
   assert.match(sheet, /<f>SUM\(C4:C6\)<\/f><v>4<\/v>/);
   assert.match(sheet, /Анна/);
 
