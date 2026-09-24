@@ -11,7 +11,6 @@ if (!adminToken) {
 
 const { server } = await createApp({
   dataDir: env.DATA_DIR,
-  configPath: env.ELECTION_CONFIG,
   adminToken,
   maxVotesPerIp: Number(env.MAX_VOTES_PER_IP ?? 0),
   trustProxy: env.TRUST_PROXY === '1',
@@ -20,7 +19,7 @@ const { server } = await createApp({
 
 const port = Number(env.PORT ?? 3000);
 server.listen(port, env.HOST ?? '0.0.0.0', () => {
-  console.log(`Выпускник 2026: сайт голосования запущен на http://localhost:${port}`);
+  console.log(`Выпускник Краснообска 2026: сайт голосования запущен на http://localhost:${port}`);
 });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
