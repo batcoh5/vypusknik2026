@@ -2421,10 +2421,6 @@ fieldset.question {
   font-weight: 600;
   border-bottom: 0;
 }
-.results-table tbody tr:first-child td {
-  color: var(--mint);
-  font-weight: 600;
-}
 
 /* уточнения одностраничной версии */
 .candidates {
