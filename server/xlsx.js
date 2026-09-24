@@ -82,7 +82,7 @@ const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 </styleSheet>`;
 
 /**
- * @param {{ title: string, finishedAt: string, candidates: {name: string, description: string, votes: number}[] }} data
+ * @param {{ title: string, finishedAt: string, candidates: {name: string, votes: number}[] }} data
  * @returns {Buffer}
  */
 export function resultsXlsx({ title, finishedAt, candidates }) {
@@ -96,27 +96,26 @@ export function resultsXlsx({ title, finishedAt, candidates }) {
   const rows = [
     row(1, [str('A1', title, 5)]),
     row(2, [str('A2', `Итоги на ${finishedAt}`)]),
-    row(3, ['№', 'Участник', 'Подпись', 'Голоса', 'Баллы (из 160)'].map((h, i) => str(`${'ABCDE'[i]}3`, h, 4))),
+    row(3, ['№', 'Участник', 'Голоса', 'Баллы (из 160)'].map((h, i) => str(`${'ABCD'[i]}3`, h, 4))),
     ...list.map((c, i) => {
       const r = first + i;
       return row(r, [
         num(`A${r}`, i + 1),
         str(`B${r}`, c.name),
-        str(`C${r}`, c.description ?? ''),
-        num(`D${r}`, c.votes),
-        fml(`E${r}`, `IF($D$${totalRow}=0,0,D${r}/$D$${totalRow}*160)`, points(c.votes), 2),
+        num(`C${r}`, c.votes),
+        fml(`D${r}`, `IF($C$${totalRow}=0,0,C${r}/$C$${totalRow}*160)`, points(c.votes), 2),
       ]);
     }),
     row(totalRow, [
       str(`B${totalRow}`, 'Всего голосов', 1),
-      fml(`D${totalRow}`, `SUM(D${first}:D${last})`, total, 1),
-      fml(`E${totalRow}`, `SUM(E${first}:E${last})`, total ? 160 : 0, 3),
+      fml(`C${totalRow}`, `SUM(C${first}:C${last})`, total, 1),
+      fml(`D${totalRow}`, `SUM(D${first}:D${last})`, total ? 160 : 0, 3),
     ]),
   ];
 
   const sheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-<cols><col min="1" max="1" width="6" customWidth="1"/><col min="2" max="2" width="34" customWidth="1"/><col min="3" max="3" width="30" customWidth="1"/><col min="4" max="4" width="10" customWidth="1"/><col min="5" max="5" width="16" customWidth="1"/></cols>
+<cols><col min="1" max="1" width="6" customWidth="1"/><col min="2" max="2" width="34" customWidth="1"/><col min="3" max="3" width="10" customWidth="1"/><col min="4" max="4" width="16" customWidth="1"/></cols>
 <sheetData>${rows.join('')}</sheetData>
 </worksheet>`;
 
