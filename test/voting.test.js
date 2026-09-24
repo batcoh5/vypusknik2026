@@ -24,7 +24,14 @@ const ADMIN = 'test-admin-token';
 
 before(async () => {
   dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vyp-'));
-  app = await createApp({ dataDir, adminToken: ADMIN });
+  app = await createApp({
+    dataDir,
+    adminToken: ADMIN,
+    devLogin: true,
+    vkClientId: '51234567',
+    publicUrl: 'https://vote.example',
+    fetch: fakeVk,
+  });
   await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${app.server.address().port}`;
 });
@@ -34,28 +41,57 @@ after(async () => {
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
-// Устройство голосующего: локальная метка и отпечаток (в тестах — случайные).
-const newDevice = () => ({ local: bytesToHex(randomBytes(16)), fingerprint: bytesToHex(randomBytes(32)) });
+// Поддельный VK ID: принимает только правильный код и code_verifier.
+const vkCalls = [];
+async function fakeVk(url, init) {
+  const params = Object.fromEntries(new URLSearchParams(String(init.body)));
+  vkCalls.push({ url, params });
+  const json = (status, data) => ({ ok: status === 200, status, json: async () => data });
+  if (url === 'https://id.vk.ru/oauth2/auth') {
+    if (params.code !== 'good-code' || !params.code_verifier || params.device_id !== 'dev-1') {
+      return json(400, { error: 'invalid_grant' });
+    }
+    return json(200, { access_token: 'token-1', user_id: 777 });
+  }
+  if (url === 'https://id.vk.ru/oauth2/user_info' && params.access_token === 'token-1') {
+    return json(200, { user: { user_id: '777', first_name: 'Анна', last_name: 'С' } });
+  }
+  return json(401, { error: 'invalid_token' });
+}
 
-// Минимальный «браузер»: хранит cookie между запросами.
+let nextUid = 1000;
+
+// Минимальный «браузер»: хранит cookie между запросами, не следует редиректам.
 function client() {
-  let cookie = '';
+  const jar = {};
   const fn = async (method, url, body, headers = {}) => {
     const res = await fetch(base + url, {
       method,
+      redirect: 'manual',
       headers: {
-        ...(cookie ? { cookie } : {}),
+        cookie: Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; '),
         ...(body ? { 'content-type': 'application/json' } : {}),
         ...headers,
       },
       body: body ? JSON.stringify(body) : undefined,
     });
-    const set = res.headers.get('set-cookie');
-    if (set) cookie = set.split(';')[0];
-    return { status: res.status, data: await res.json() };
+    for (const c of res.headers.getSetCookie()) {
+      const [kv] = c.split(';');
+      const i = kv.indexOf('=');
+      jar[kv.slice(0, i)] = kv.slice(i + 1);
+    }
+    const text = await res.text();
+    return { status: res.status, location: res.headers.get('location'), data: text ? JSON.parse(text) : null };
   };
-  fn.device = newDevice();
   return fn;
+}
+
+// «Человек» — браузер, вошедший через (тестовый) аккаунт ВКонтакте.
+async function voter(uid = nextUid++) {
+  const api = client();
+  await api('GET', `/auth/dev?uid=${uid}`);
+  api.uid = uid;
+  return api;
 }
 
 const admin = client();
@@ -70,13 +106,13 @@ const SAMPLE = {
   ],
 };
 
-async function vote(api, electionId, choices, device = api.device) {
+async function vote(api, electionId, choices) {
   const { data } = await api('GET', `/api/elections/${electionId}`);
   const keys = await loadPublicKeys(data.election.publicKeys);
-  await api('POST', `/api/elections/${electionId}/session`, { device });
+  await api('GET', `/api/elections/${electionId}/session`);
   const token = bytesToHex(randomBytes(32));
   const { blinded, r } = await blindToken(token, keys.rsaPub);
-  const signed = await api('POST', `/api/elections/${electionId}/sign`, { blinded, device });
+  const signed = await api('POST', `/api/elections/${electionId}/sign`, { blinded });
   if (signed.status !== 200) return { signed };
   const signature = unblindSignature(signed.data.blindSignature, r, keys.rsaPub);
   const ballot = await encryptBallot(electionId, choices, keys.electionKey);
@@ -116,12 +152,12 @@ test('полный цикл: создать, запустить, проголо�
   assert.equal((await asAdmin('DELETE', `/api/admin/elections/${id}`)).status, 409);
 
   // Голосуем.
-  const alice = client();
+  const alice = await voter();
   const r1 = await vote(alice, id, { q1: 'c2', q2: 'c1' });
   assert.equal(r1.cast.status, 200);
   assert.equal((await verifyBlock(r1.cast.data.block, null, r1.keys)).ok, true);
-  assert.equal((await vote(client(), id, { q1: 'c2', q2: 'c2' })).cast.status, 200);
-  assert.equal((await vote(client(), id, { q1: 'c3', q2: 'c1' })).cast.status, 200);
+  assert.equal((await vote(await voter(), id, { q1: 'c2', q2: 'c2' })).cast.status, 200);
+  assert.equal((await vote(await voter(), id, { q1: 'c3', q2: 'c1' })).cast.status, 200);
 
   // Второй бюллетень с того же устройства не выдаётся.
   assert.equal((await vote(alice, id, { q1: 'c1', q2: 'c1' })).signed.status, 409);
@@ -170,7 +206,7 @@ test('полный цикл: создать, запустить, проголо�
   assert.equal((await verifyBlock(tampered, null, keys)).ok, false);
 
   // После завершения голоса не принимаются.
-  assert.equal((await vote(client(), id, { q1: 'c1', q2: 'c1' })).signed.status, 403);
+  assert.equal((await vote(await voter(), id, { q1: 'c1', q2: 'c1' })).signed.status, 403);
 
   // Удаление и новое голосование: тот же человек снова может проголосовать один раз.
   assert.equal((await asAdmin('DELETE', `/api/admin/elections/${id}`)).status, 200);
@@ -194,38 +230,68 @@ test('полный цикл: создать, запустить, проголо�
   assert.equal(list.data.elections.length, 2);
 });
 
-test('строгая защита: другой браузер, инкогнито или VPN на том же устройстве не дают голосовать повторно', async () => {
-  const strictId = (await asAdmin('POST', '/api/admin/elections', SAMPLE)).data.election.id;
-  const list = await asAdmin('GET', '/api/admin/elections');
-  const active = list.data.elections.find((e) => e.status === 'active');
+test('без входа через ВКонтакте бюллетень не выдаётся, один аккаунт — один голос', async () => {
+  const id = (await asAdmin('POST', '/api/admin/elections', SAMPLE)).data.election.id;
+  const active = (await asAdmin('GET', '/api/admin/elections')).data.elections.find((e) => e.status === 'active');
   if (active) await asAdmin('POST', `/api/admin/elections/${active.id}/finish`);
-  await asAdmin('POST', `/api/admin/elections/${strictId}/start`);
+  await asAdmin('POST', `/api/admin/elections/${id}/start`);
 
-  const phone = newDevice();
-  assert.equal((await vote(client(), strictId, { q1: 'c1', q2: 'c1' }, phone)).cast.status, 200);
+  // Не вошёл — голосовать нельзя.
+  const guest = client();
+  assert.equal((await guest('GET', `/api/elections/${id}/session`)).data.loggedIn, false);
+  assert.equal((await vote(guest, id, { q1: 'c1', q2: 'c1' })).signed.status, 401);
 
-  // Инкогнито / другой браузер: новые cookie и локальная метка, но тот же отпечаток.
-  const otherBrowser = client();
-  const again = { ...newDevice(), fingerprint: phone.fingerprint };
-  const session = await otherBrowser('POST', `/api/elections/${strictId}/session`, { device: again });
-  assert.equal(session.data.ballotIssued, true);
-  assert.equal((await vote(otherBrowser, strictId, { q1: 'c2', q2: 'c1' }, again)).signed.status, 409);
+  // Тот же аккаунт ВКонтакте из другого браузера, инкогнито или через VPN — отказ.
+  const phone = await voter(4242);
+  assert.equal((await vote(phone, id, { q1: 'c1', q2: 'c1' })).cast.status, 200);
+  const laptop = await voter(4242);
+  assert.equal((await laptop('GET', `/api/elections/${id}/session`)).data.ballotIssued, true);
+  assert.equal((await vote(laptop, id, { q1: 'c2', q2: 'c2' })).signed.status, 409);
 
-  // Очищены cookie, но сохранилась локальная метка.
-  const cleared = { ...newDevice(), local: phone.local };
-  assert.equal((await vote(client(), strictId, { q1: 'c2', q2: 'c1' }, cleared)).signed.status, 409);
+  // Другие аккаунты голосуют спокойно — даже с одинаковых телефонов.
+  assert.equal((await vote(await voter(4343), id, { q1: 'c3', q2: 'c2' })).cast.status, 200);
 
-  // Без данных об устройстве голосовать нельзя.
-  assert.equal((await client()('POST', `/api/elections/${strictId}/session`, {})).status, 400);
+  // Выход завершает сессию.
+  await phone('GET', '/auth/logout');
+  assert.equal((await phone('GET', `/api/elections/${id}/session`)).data.loggedIn, false);
+});
 
-  // Другое устройство голосует спокойно.
-  assert.equal((await vote(client(), strictId, { q1: 'c3', q2: 'c2' })).cast.status, 200);
-  await asAdmin('POST', `/api/admin/elections/${strictId}/finish`);
+test('вход через VK ID: PKCE, проверка state, обмен кода на токен', async () => {
+  const b = client();
+  const start = await b('GET', '/auth/vk/start?return=/vote');
+  assert.equal(start.status, 302);
+  const auth = new URL(start.location);
+  assert.equal(auth.origin + auth.pathname, 'https://id.vk.ru/authorize');
+  assert.equal(auth.searchParams.get('client_id'), '51234567');
+  assert.equal(auth.searchParams.get('redirect_uri'), 'https://vote.example/auth/vk/callback');
+  assert.equal(auth.searchParams.get('code_challenge_method'), 'S256');
+  const state = auth.searchParams.get('state');
+  assert.ok(state.length >= 32);
 
-  // С выключенной строгой защитой тот же отпечаток не мешает (например, одинаковые телефоны).
-  const softId = (await asAdmin('POST', '/api/admin/elections', { ...SAMPLE, strict: false })).data.election.id;
-  assert.equal((await asAdmin('GET', '/api/admin/elections')).data.elections.find((e) => e.id === softId).strict, false);
-  await asAdmin('POST', `/api/admin/elections/${softId}/start`);
-  assert.equal((await vote(client(), softId, { q1: 'c1', q2: 'c1' }, phone)).cast.status, 200);
-  assert.equal((await vote(client(), softId, { q1: 'c1', q2: 'c1' }, phone)).cast.status, 200);
+  // Подменённый state отклоняется.
+  const bad = await b('GET', `/auth/vk/callback?code=good-code&state=wrong&device_id=dev-1`);
+  assert.equal(bad.location, '/vote?auth=failed');
+
+  const again = new URL((await b('GET', '/auth/vk/start?return=/vote')).location).searchParams.get('state');
+  const ok = await b('GET', `/auth/vk/callback?code=good-code&state=${again}&device_id=dev-1`);
+  assert.equal(ok.status, 302);
+  assert.equal(ok.location, '/vote');
+  const exchange = vkCalls.find((c) => c.url.endsWith('/oauth2/auth'));
+  assert.equal(exchange.params.grant_type, 'authorization_code');
+  assert.equal(exchange.params.redirect_uri, 'https://vote.example/auth/vk/callback');
+
+  const me = await b('GET', '/api/me');
+  assert.equal(me.data.user.name, 'Анна С');
+  assert.equal(me.data.vkConfigured, true);
+
+  // Неверный код — вход не выполняется.
+  const c = client();
+  const st = new URL((await c('GET', '/auth/vk/start')).location).searchParams.get('state');
+  const fail = await c('GET', `/auth/vk/callback?code=bad&state=${st}&device_id=dev-1`);
+  assert.equal(fail.location, '/vote?auth=failed');
+  assert.equal((await c('GET', '/api/me')).data.user, null);
+
+  // Возврат только на свои страницы.
+  const evil = new URL((await client()('GET', '/auth/vk/start?return=//evil.example')).location);
+  assert.ok(evil.searchParams.get('state'));
 });

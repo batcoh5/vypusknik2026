@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import { openDb } from './db.js';
 import { loadSecret, generateElectionKeys, electionCrypto } from './keys.js';
-import { createDeviceIdentity } from './identity.js';
+import { createVkIdentity } from './identity.js';
 import {
   GENESIS_HASH,
   computeBlockHash,
@@ -112,7 +112,6 @@ export function normalizeElectionInput(body) {
     title,
     description,
     endsAt,
-    strict: body.strict !== false,
     questions: questions.map((q, qi) => {
       const qTitle = text(q?.title, `Номинация ${qi + 1}`, { min: 1, max: 120 });
       const candidates = Array.isArray(q?.candidates) ? q.candidates : [];
@@ -139,7 +138,14 @@ export async function createApp(options = {}) {
 
   const secret = loadSecret(dataDir);
   const db = openDb(dataDir);
-  const identity = createDeviceIdentity(secret, { secureCookies: options.secureCookies ?? false });
+  const identity = createVkIdentity(secret, {
+    vkClientId: options.vkClientId,
+    vkHost: options.vkHost,
+    publicUrl: options.publicUrl,
+    secureCookies: options.secureCookies ?? false,
+    devLogin: options.devLogin ?? false,
+    fetch: options.fetch,
+  });
   const maxPerIp = options.maxVotesPerIp ?? 0;
   const trustProxy = options.trustProxy ?? false;
   const adminToken = options.adminToken;
@@ -192,7 +198,6 @@ export async function createApp(options = {}) {
       questions: e.questions,
       status: e.status,
       endsAt: e.endsAt,
-      strict: e.strict,
       startedAt: e.startedAt,
       finishedAt: e.finishedAt,
       publicKeys: c.public,
@@ -210,7 +215,6 @@ export async function createApp(options = {}) {
       questions: e.questions,
       status: e.status,
       endsAt: e.endsAt,
-      strict: e.strict,
       createdAt: e.createdAt,
       startedAt: e.startedAt,
       finishedAt: e.finishedAt,
@@ -230,22 +234,6 @@ export async function createApp(options = {}) {
     const e = publicElectionById(id);
     if (e.status !== 'active') throw new HttpError(403, 'not_active', 'Приём голосов в этом голосовании завершён');
     return e;
-  }
-
-  // Метки, по которым узнаётся уже проголосовавшее устройство. В строгом режиме
-  // кроме cookie учитываются локальная метка браузера и отпечаток устройства,
-  // одинаковый в любом браузере, в инкогнито и через VPN. Хранятся только HMAC.
-  function deviceMarks(e, identityKey, device) {
-    const marks = [`id:${identityKey}`];
-    if (e.strict) {
-      const local = String(device?.local ?? '');
-      const fingerprint = String(device?.fingerprint ?? '');
-      if (!/^[0-9a-f]{32}$/.test(local) || !/^[0-9a-f]{64}$/.test(fingerprint)) {
-        throw new HttpError(400, 'no_device', 'Не удалось проверить устройство. Обновите страницу');
-      }
-      marks.push(`local:${local}`, `fp:${fingerprint}`);
-    }
-    return marks.map((m) => secret.hmac(`mark:${e.id}:${m}`));
   }
 
   function clientIp(req) {
@@ -278,23 +266,26 @@ export async function createApp(options = {}) {
 
   route('GET', '/api/current', async () => {
     const e = db.activeElection() ?? db.lastFinishedElection();
-    return { election: e ? publicElection(e) : null, serverTime: now().toISOString(), identityProvider: identity.name };
+    return { election: e ? publicElection(e) : null, serverTime: now().toISOString() };
   });
+
+  // Кто вошёл: имя из ВКонтакте хранится только в cookie самого пользователя.
+  route('GET', '/api/me', async ({ req }) => ({
+    user: identity.user(req),
+    vkConfigured: identity.configured,
+    devLogin: identity.devLogin,
+  }));
 
   route('GET', '/api/elections/:id', async ({ params }) => ({
     election: publicElection(publicElectionById(params.id)),
     serverTime: now().toISOString(),
   }));
 
-  route('POST', '/api/elections/:id/session', async ({ req, res, body, params }) => {
+  route('GET', '/api/elections/:id/session', async ({ req, params }) => {
     const e = publicElectionById(params.id);
-    identity.ensure(req, res);
     const id = identity.identify(req);
     const voter = id ? db.getVoter(e.id, id) : null;
-    // Новая cookie ещё не дошла до браузера — метку по ней проверять нечем, смотрим остальные.
-    const marks = deviceMarks(e, id ?? 'new', body.device);
-    const issued = Boolean(voter) || db.anyMark(e.id, marks);
-    return { status: e.status, ballotIssued: issued, blinded: voter?.blinded ?? null };
+    return { status: e.status, loggedIn: Boolean(id), ballotIssued: Boolean(voter), blinded: voter?.blinded ?? null };
   });
 
   // Шаг 1: избиратель получает слепую подпись на свой анонимный токен.
@@ -302,22 +293,18 @@ export async function createApp(options = {}) {
     const e = activeElectionById(params.id);
     const c = cryptoFor(e);
     const id = identity.identify(req);
-    if (!id) throw new HttpError(401, 'no_session', 'Сессия не найдена. Обновите страницу');
+    if (!id) throw new HttpError(401, 'no_session', 'Войдите через ВКонтакте, чтобы проголосовать');
     const blinded = String(body.blinded ?? '').toLowerCase();
     if (!/^[0-9a-f]+$/.test(blinded) || blinded.length !== c.rsaPub.bytes * 2) {
       throw new HttpError(400, 'bad_request', 'Некорректный запрос');
     }
     const ip = secret.hmac('ip:' + clientIp(req));
-    const marks = deviceMarks(e, id, body.device);
     return db.transaction(() => {
       const voter = db.getVoter(e.id, id);
       if (voter) {
         // Повтор того же запроса (например, оборвалась связь) — отдаём ту же подпись.
         if (voter.blinded === blinded) return { blindSignature: voter.blind_sig };
-        throw new HttpError(409, 'already_issued', 'С этого устройства уже проголосовали в этом голосовании');
-      }
-      if (db.anyMark(e.id, marks)) {
-        throw new HttpError(409, 'already_issued', 'С этого устройства уже проголосовали в этом голосовании');
+        throw new HttpError(409, 'already_issued', 'С этого аккаунта ВКонтакте уже проголосовали в этом голосовании');
       }
       if (maxPerIp > 0 && db.countVotersByIp(e.id, ip) >= maxPerIp) {
         throw new HttpError(429, 'ip_limit', 'Превышено число бюллетеней для вашей сети');
@@ -329,7 +316,6 @@ export async function createApp(options = {}) {
         throw new HttpError(400, 'bad_request', 'Некорректный запрос');
       }
       db.addVoter(e.id, { identity: id, ip, blinded, blindSig: blindSignature, issuedAt: now().toISOString() });
-      db.addMarks(e.id, marks);
       return { blindSignature };
     });
   });
@@ -519,6 +505,13 @@ export async function createApp(options = {}) {
   async function handle(req, res) {
     const url = new URL(req.url, 'http://localhost');
     try {
+      if (url.pathname.startsWith('/auth/') && req.method === 'GET') {
+        if (!apiLimiter(clientIp(req))) throw new HttpError(429, 'rate_limited', 'Слишком много запросов. Попробуйте через минуту');
+        if (url.pathname === '/auth/vk/start') return identity.start(req, res, url);
+        if (url.pathname === '/auth/vk/callback') return await identity.callback(req, res, url);
+        if (url.pathname === '/auth/logout') return identity.logout(req, res);
+        if (url.pathname === '/auth/dev' && identity.devLogin) return identity.dev(req, res, url);
+      }
       if (url.pathname.startsWith('/api/')) {
         if (!apiLimiter(clientIp(req))) {
           throw new HttpError(429, 'rate_limited', 'Слишком много запросов. Попробуйте через минуту');

@@ -2176,3 +2176,20 @@ fieldset.question {
   font: 400 9px var(--font);
   fill: var(--muted);
 }
+
+/* кнопка входа через ВКонтакте */
+.btn--vk {
+  color: #fff;
+  background: #0077ff;
+  box-shadow: 0 8px 28px rgba(0, 119, 255, 0.35);
+}
+.btn--vk:hover {
+  background: #1a85ff;
+}
+.btn--vk svg {
+  width: 20px;
+  height: 20px;
+}
+.text {
+  color: var(--text);
+}
