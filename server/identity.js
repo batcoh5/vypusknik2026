@@ -29,7 +29,7 @@ const b64u = (buf) => Buffer.from(buf).toString('base64url');
 // Разрешаем возвращаться только на свои страницы.
 export function safeReturn(value) {
   const s = String(value ?? '');
-  return /^\/(?![/\\])[\w\-./?=&%]*$/.test(s) ? s : '/vote';
+  return /^\/(?![/\\])[\w\-./?=&%]*$/.test(s) ? s : '/';
 }
 
 export function createVkIdentity(secret, options = {}) {
@@ -95,7 +95,7 @@ export function createVkIdentity(secret, options = {}) {
 
     // Начало входа: генерируем state и code_verifier, запоминаем их в короткой cookie.
     start(req, res, url) {
-      if (!clientId || !publicUrl) return redirect(res, '/vote?auth=not_configured');
+      if (!clientId || !publicUrl) return redirect(res, '/?auth=not_configured');
       const state = b64u(crypto.randomBytes(32));
       const verifier = b64u(crypto.randomBytes(48));
       const challenge = b64u(crypto.createHash('sha256').update(verifier).digest());
@@ -122,7 +122,7 @@ export function createVkIdentity(secret, options = {}) {
       const state = url.searchParams.get('state');
       const deviceId = url.searchParams.get('device_id');
       if (!pkce || !code || !state || !deviceId || state !== pkce.state) {
-        return redirect(res, '/vote?auth=failed', [clear]);
+        return redirect(res, '/?auth=failed', [clear]);
       }
       try {
         const post = async (path, params) => {
@@ -151,7 +151,7 @@ export function createVkIdentity(secret, options = {}) {
         redirect(res, pkce.back, [clear, startSession(res, { id: uid, name })]);
       } catch (err) {
         console.error('VK ID:', err.message);
-        redirect(res, '/vote?auth=failed', [clear]);
+        redirect(res, '/?auth=failed', [clear]);
       }
     },
 
@@ -162,7 +162,7 @@ export function createVkIdentity(secret, options = {}) {
     },
 
     logout(req, res) {
-      redirect(res, '/vote', [cookie(SESSION, '', 0)]);
+      redirect(res, '/', [cookie(SESSION, '', 0)]);
     },
   };
 }

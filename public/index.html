@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Выпускник Краснообска 2026 — голосование</title>
-  <meta name="description" content="Народное голосование конкурса «Выпускник Краснообска 2026». Тайно, с шифрованием и открытым реестром голосов.">
+  <title>Выпускник Краснообска 2026 — зрительское голосование</title>
+  <meta name="description" content="Зрительское голосование конкурса «Выпускник Краснообска 2026». Выберите участника и отдайте свой голос.">
   <meta name="theme-color" content="#0a0a0a">
   <link rel="icon" href="/img/favicon.png" type="image/png">
   <link rel="preload" href="/fonts/geist-cyrillic-57c931.woff2" as="font" type="font/woff2" crossorigin>
@@ -14,61 +14,32 @@
 </head>
 <body>
   <main>
-    <section class="hero">
+    <section class="hero hero--compact">
       <div class="container hero__inner">
         <div data-reveal><img class="hero__hat" src="/img/logo.jpg" alt="" width="84" height="84"></div>
-        <div data-reveal id="hero-status"><span class="sk sk--btn badge-sk"></span></div>
+        <div data-reveal class="eyebrow eyebrow--center">Зрительское голосование</div>
         <h1 data-reveal>Выпускник<span class="thin">Краснообска 2026</span></h1>
         <div data-reveal class="hero__lead lead-sk" id="hero-lead">
           <div class="sk sk--line"></div><div class="sk sk--line sk--short center-sk"></div>
         </div>
         <div data-reveal id="hero-countdown"></div>
-        <div data-reveal class="hero__actions" id="hero-actions">
-          <span class="sk sk--btn"></span><span class="sk sk--btn"></span>
-        </div>
       </div>
     </section>
 
-    <section class="container" id="stats-wrap" hidden>
-      <div class="stats" data-reveal>
-        <div class="stat"><div class="stat__value" id="stat-cast">0</div><div class="stat__label">голосов в реестре</div></div>
-        <div class="stat"><div class="stat__value" id="stat-issued">0</div><div class="stat__label">бюллетеней выдано</div></div>
-        <div class="stat"><div class="stat__value" id="stat-noms">0</div><div class="stat__label">номинаций</div></div>
-        <div class="stat"><div class="stat__value" id="stat-cands">0</div><div class="stat__label">участников</div></div>
-      </div>
-    </section>
-
-    <section class="section" id="nominations-section" hidden>
-      <div class="container">
-        <div data-reveal>
-          <div class="eyebrow">Номинации</div>
-          <h2 class="section-title" id="nom-title">За кого можно проголосовать</h2>
-          <p class="section-sub">В каждой номинации выбирается один участник. Проголосовать можно только один раз.</p>
+    <section class="container vote-section" id="vote">
+      <div id="vote-root">
+        <div class="candidates">
+          <div class="sk candidate-sk"></div><div class="sk candidate-sk"></div><div class="sk candidate-sk"></div>
         </div>
-        <div class="grid grid--2 nominations-grid top-gap-sm" id="nominations"></div>
-      </div>
-    </section>
-
-    <section class="section section--line" id="how">
-      <div class="container">
-        <div data-reveal>
-          <div class="eyebrow">Безопасность</div>
-          <h2 class="section-title">Ваш голос — тайный, честный и проверяемый</h2>
-          <p class="section-sub">Голосование устроено по принципам дистанционного электронного голосования: никто не узнает ваш выбор, его нельзя подменить, а итоги может пересчитать каждый.</p>
-        </div>
-        <div class="grid grid--3 steps top-gap" id="how-grid"></div>
-      </div>
-    </section>
-
-    <section class="section section--line" id="faq">
-      <div class="container container--narrow">
-        <div data-reveal>
-          <div class="eyebrow">Вопросы</div>
-          <h2 class="section-title">Частые вопросы</h2>
-        </div>
-        <div class="top-gap" id="faq-list"></div>
       </div>
     </section>
   </main>
+
+  <div class="vote-bar" id="vote-bar" hidden>
+    <div class="vote-bar__inner">
+      <div class="vote-bar__choice" id="vote-bar-choice"></div>
+      <button class="btn btn--brand btn--lg" id="vote-button"></button>
+    </div>
+  </div>
 </body>
 </html>

@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { openDb } from './db.js';
 import { loadSecret, generateElectionKeys, electionCrypto } from './keys.js';
 import { createVkIdentity } from './identity.js';
+import { resultsXlsx } from './xlsx.js';
 import {
   GENESIS_HASH,
   computeBlockHash,
@@ -19,6 +20,8 @@ import {
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const MAX_BODY = 64 * 1024;
+const MAX_PHOTO_BODY = 4 * 1024 * 1024;
+const PHOTO_RE = /^\/photos\/[a-f0-9]{24}\.(jpg|png|webp)$/;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -48,6 +51,8 @@ const SECURITY_HEADERS = {
   'Referrer-Policy': 'no-referrer',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
 };
+
+const SENT = Symbol('sent');
 
 export class HttpError extends Error {
   constructor(status, code, message) {
@@ -104,31 +109,32 @@ export function normalizeElectionInput(body) {
     if (Number.isNaN(t)) throw new HttpError(400, 'invalid', 'Некорректная дата окончания');
     endsAt = new Date(t).toISOString();
   }
-  const questions = Array.isArray(body.questions) ? body.questions : [];
-  if (questions.length < 1 || questions.length > 10) {
-    throw new HttpError(400, 'invalid', 'Добавьте от 1 до 10 номинаций');
+  const candidates = Array.isArray(body.candidates) ? body.candidates : [];
+  if (candidates.length < 2 || candidates.length > 40) {
+    throw new HttpError(400, 'invalid', 'Добавьте от 2 до 40 участников');
   }
   return {
     title,
     description,
     endsAt,
-    questions: questions.map((q, qi) => {
-      const qTitle = text(q?.title, `Номинация ${qi + 1}`, { min: 1, max: 120 });
-      const candidates = Array.isArray(q?.candidates) ? q.candidates : [];
-      if (candidates.length < 2 || candidates.length > 30) {
-        throw new HttpError(400, 'invalid', `В номинации «${qTitle}» должно быть от 2 до 30 вариантов`);
-      }
-      return {
-        id: `q${qi + 1}`,
-        title: qTitle,
-        description: text(q?.description, `Описание номинации «${qTitle}»`, { max: 500 }),
-        candidates: candidates.map((c, ci) => ({
-          id: `c${ci + 1}`,
-          name: text(c?.name, `Вариант ${ci + 1} в «${qTitle}»`, { min: 1, max: 120 }),
-          description: text(c?.description, `Подпись варианта ${ci + 1} в «${qTitle}»`, { max: 300 }),
-        })),
-      };
-    }),
+    // Одна номинация на голосование; внутри хранится как список из одного вопроса.
+    questions: [
+      {
+        id: 'q1',
+        title,
+        description: '',
+        candidates: candidates.map((c, ci) => {
+          const photo = String(c?.photo ?? '');
+          if (photo && !PHOTO_RE.test(photo)) throw new HttpError(400, 'invalid', `Некорректное фото участника ${ci + 1}`);
+          return {
+            id: `c${ci + 1}`,
+            name: text(c?.name, `Имя участника ${ci + 1}`, { min: 1, max: 120 }),
+            description: text(c?.description, `Подпись участника ${ci + 1}`, { max: 300 }),
+            photo: photo || null,
+          };
+        }),
+      },
+    ],
   };
 }
 
@@ -136,6 +142,7 @@ export async function createApp(options = {}) {
   const dataDir = options.dataDir ?? path.join(ROOT, 'data');
   fs.mkdirSync(dataDir, { recursive: true });
 
+  const photosDir = path.join(dataDir, 'photos');
   const secret = loadSecret(dataDir);
   const db = openDb(dataDir);
   const identity = createVkIdentity(secret, {
@@ -201,9 +208,6 @@ export async function createApp(options = {}) {
       startedAt: e.startedAt,
       finishedAt: e.finishedAt,
       publicKeys: c.public,
-      electionPrivateKey: e.status === 'finished' ? c.electionPrivateJwk : null,
-      tally: e.status === 'finished' ? e.tally : null,
-      stats: { ballotsIssued: db.countVoters(e.id), ballotsCast: db.countBlocks(e.id) },
     };
   }
 
@@ -269,6 +273,7 @@ export async function createApp(options = {}) {
     routes.push({ method, re, handler });
   };
 
+  // Для зрителя: идущее голосование или последнее завершённое (без итогов).
   route('GET', '/api/current', async () => {
     const e = db.activeElection() ?? db.lastFinishedElection();
     return { election: e ? publicElection(e) : null, serverTime: now().toISOString() };
@@ -364,25 +369,6 @@ export async function createApp(options = {}) {
     });
   });
 
-  route('GET', '/api/elections/:id/ledger', async ({ params, url }) => {
-    const e = publicElectionById(params.id);
-    const from = Math.max(0, parseInt(url.searchParams.get('from') ?? '0', 10) || 0);
-    const limit = Math.min(500, Math.max(1, parseInt(url.searchParams.get('limit') ?? '50', 10) || 50));
-    return { total: db.countBlocks(e.id), blocks: db.blocks(e.id, from, limit) };
-  });
-
-  // Квитанция по хешу блока (хеши уникальны во всех голосованиях).
-  route('GET', '/api/receipts/:hash', async ({ params }) => {
-    const hash = params.hash.toLowerCase();
-    if (!/^[0-9a-f]{64}$/.test(hash)) throw new HttpError(400, 'bad_request', 'Некорректный номер квитанции');
-    const block = db.blockByHash(hash);
-    if (!block) throw new HttpError(404, 'not_found', 'Бюллетень с таким номером не найден');
-    const e = db.election(block.electionId);
-    const prev = block.index > 0 ? db.blockByIndex(e.id, block.index - 1) : null;
-    const next = db.blockByIndex(e.id, block.index + 1);
-    return { block, prev, nextHash: next?.hash ?? null, total: db.countBlocks(e.id), election: publicElection(e) };
-  });
-
   // ---------- админ-панель ----------
 
   route('GET', '/api/admin/elections', async ({ req }) => {
@@ -434,6 +420,47 @@ export async function createApp(options = {}) {
     return { election: adminElection(await finish(params.id)) };
   });
 
+  // Фото участника: картинка уже уменьшена в браузере, сервер только проверяет и сохраняет.
+  route('POST', '/api/admin/photos', async ({ req, body }) => {
+    requireAdmin(req);
+    const m = String(body.data ?? '').match(/^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/);
+    if (!m) throw new HttpError(400, 'invalid', 'Загрузите картинку JPG, PNG или WebP');
+    const buf = Buffer.from(m[2], 'base64');
+    const magic = {
+      jpeg: buf[0] === 0xff && buf[1] === 0xd8,
+      png: buf.subarray(0, 4).toString('hex') === '89504e47',
+      webp: buf.subarray(0, 4).toString() === 'RIFF' && buf.subarray(8, 12).toString() === 'WEBP',
+    };
+    if (!magic[m[1]] || buf.length > 3 * 1024 * 1024) throw new HttpError(400, 'invalid', 'Файл не похож на картинку или больше 3 МБ');
+    const ext = { jpeg: 'jpg', png: 'png', webp: 'webp' }[m[1]];
+    const name = `${crypto.randomBytes(12).toString('hex')}.${ext}`;
+    fs.mkdirSync(photosDir, { recursive: true });
+    fs.writeFileSync(path.join(photosDir, name), buf);
+    return { url: `/photos/${name}` };
+  });
+
+  // Итоги в Excel: баллы = голоса / всего × 160 (формулой).
+  route('GET', '/api/admin/elections/:id/results.xlsx', async ({ req, res, params }) => {
+    requireAdmin(req);
+    const e = db.election(params.id);
+    if (!e) throw new HttpError(404, 'not_found', 'Голосование не найдено');
+    if (!e.tally) throw new HttpError(409, 'not_finished', 'Итоги появятся после завершения голосования');
+    const q = e.questions[0];
+    const file = resultsXlsx({
+      title: e.title,
+      finishedAt: new Date(e.finishedAt).toLocaleString('ru-RU', { timeZone: 'Asia/Novosibirsk' }),
+      candidates: q.candidates.map((c) => ({ name: c.name, description: c.description, votes: e.tally.counts[q.id][c.id] ?? 0 })),
+    });
+    res.writeHead(200, {
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="results.xlsx"; filename*=UTF-8''${encodeURIComponent(`Итоги — ${e.title}.xlsx`)}`,
+      'Cache-Control': 'no-store',
+      ...SECURITY_HEADERS,
+    });
+    res.end(file);
+    return SENT;
+  });
+
   route('DELETE', '/api/admin/elections/:id', async ({ req, params }) => {
     requireAdmin(req);
     return withLedgerLock(async () => {
@@ -442,6 +469,10 @@ export async function createApp(options = {}) {
       if (e.status === 'active') throw new HttpError(409, 'bad_state', 'Сначала завершите голосование');
       db.deleteElection(e.id);
       cryptoCache.delete(e.id);
+      // Вместе с голосованием удаляются и фото его участников.
+      for (const c of e.questions.flatMap((q) => q.candidates)) {
+        if (c.photo && PHOTO_RE.test(c.photo)) fs.rmSync(path.join(photosDir, path.basename(c.photo)), { force: true });
+      }
       return { deleted: e.id };
     });
   });
@@ -457,13 +488,13 @@ export async function createApp(options = {}) {
     res.end(JSON.stringify(payload));
   }
 
-  function readBody(req) {
+  function readBody(req, limit = MAX_BODY) {
     return new Promise((resolve, reject) => {
       let size = 0;
       const chunks = [];
       req.on('data', (c) => {
         size += c.length;
-        if (size > MAX_BODY) {
+        if (size > limit) {
           reject(new HttpError(413, 'too_large', 'Слишком большой запрос'));
           req.destroy();
           return;
@@ -482,6 +513,30 @@ export async function createApp(options = {}) {
       req.on('error', reject);
     });
   }
+
+  // Фото участников лежат в DATA_DIR/photos (на Railway — на Volume).
+  function servePhoto(req, res, url) {
+    if (!PHOTO_RE.test(url.pathname)) return false;
+    const file = path.join(photosDir, path.basename(url.pathname));
+    let stat;
+    try {
+      stat = fs.statSync(file);
+    } catch {
+      return false;
+    }
+    res.writeHead(200, {
+      'Content-Type': MIME[path.extname(file)] ?? 'application/octet-stream',
+      'Content-Length': stat.size,
+      'Cache-Control': 'public, max-age=86400, immutable',
+      ...SECURITY_HEADERS,
+    });
+    if (req.method === 'HEAD') res.end();
+    else fs.createReadStream(file).pipe(res);
+    return true;
+  }
+
+  // Старые страницы (голосование, проверка, реестр, итоги) — теперь всё на главной.
+  const LEGACY = new Set(['/vote', '/verify', '/ledger', '/results', '/vote.html', '/verify.html', '/ledger.html', '/results.html']);
 
   function serveStatic(req, res, url) {
     let rel;
@@ -547,10 +602,18 @@ export async function createApp(options = {}) {
         }
         if (!match) throw new HttpError(allowed ? 405 : 404, 'not_found', 'Метод не найден');
         await autoFinish();
-        const body = hasBody ? await readBody(req) : {};
-        return send(res, 200, await match.r.handler({ req, res, body, url, params: match.params }));
+        const body = hasBody ? await readBody(req, url.pathname === '/api/admin/photos' ? MAX_PHOTO_BODY : MAX_BODY) : {};
+        const result = await match.r.handler({ req, res, body, url, params: match.params });
+        if (result !== SENT) send(res, 200, result);
+        return;
       }
-      if ((req.method === 'GET' || req.method === 'HEAD') && serveStatic(req, res, url)) return;
+      if (req.method === 'GET' || req.method === 'HEAD') {
+        if (LEGACY.has(url.pathname)) {
+          res.writeHead(301, { Location: '/' + url.search, ...SECURITY_HEADERS });
+          return res.end();
+        }
+        if (servePhoto(req, res, url) || serveStatic(req, res, url)) return;
+      }
       res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8', ...SECURITY_HEADERS });
       res.end(fs.readFileSync(path.join(PUBLIC_DIR, '404.html')));
     } catch (err) {
