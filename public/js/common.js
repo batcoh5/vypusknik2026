@@ -55,7 +55,11 @@ const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matche
 
 function brandHtml() {
   return `<a class="brand" href="/" aria-label="Выпускник Краснообска — на главную">
-    <img class="brand__logo" src="/img/wordmark.png" alt="Выпускник Краснообска 2026" width="150" height="46">
+    <img class="brand__mark" src="/img/logo.jpg" alt="" width="32" height="32">
+    <svg class="brand__word" viewBox="0 0 124 30" role="img" aria-label="Выпускник Краснообска 2026">
+      <text class="brand__name" x="0" y="13" textLength="124" lengthAdjust="spacingAndGlyphs">ВЫПУСКНИК</text>
+      <text class="brand__sub" x="0.5" y="27.5" textLength="123" lengthAdjust="spacing">КРАСНООБСКА 2026</text>
+    </svg>
   </a>`;
 }
 
