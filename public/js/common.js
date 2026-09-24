@@ -65,7 +65,7 @@ function brandHtml() {
 
 export function renderChrome() {
   document.body.prepend(
-    el(`<div class="glows" aria-hidden="true"><div class="grid-bg"></div><div class="glow glow--a"></div><div class="glow glow--b"></div><div class="glow glow--c"></div></div>`),
+    el(`<div class="glows" aria-hidden="true"><div class="grid-bg"></div></div>`),
   );
 
   const footer = el(`
@@ -75,12 +75,6 @@ export function renderChrome() {
           <div class="footer__about">
             ${brandHtml()}
             <p>Зрительское голосование ежегодного конкурса «Выпускник Краснообска» для выпускников 11-х классов школ рабочего посёлка Краснообск.</p>
-          </div>
-          <div>
-            <h4>Конкурс</h4>
-            <ul>
-              <li><a href="${VK_URL}" target="_blank" rel="noopener">Группа ВКонтакте ${icons.external}</a></li>
-            </ul>
           </div>
           <div>
             <h4>Организаторы</h4>
@@ -93,7 +87,10 @@ export function renderChrome() {
         </div>
         <div class="footer__bottom">
           <span>© ${new Date().getFullYear()} «Выпускник Краснообска». Все права защищены.</span>
-          <span>Зрительское голосование</span>
+          <span class="hint">Зрительское голосование
+            <button type="button" class="hint__btn" aria-label="Что такое зрительское голосование">${icons.info}</button>
+            <span class="hint__tip" role="tooltip">Зрители сами выбирают участника, который понравился им больше всех. Голосовать может каждый — один раз через свой аккаунт ВКонтакте. Голоса зрителей переводятся в баллы (до 160) и учитываются в итогах конкурса.</span>
+          </span>
         </div>
         <svg class="footer__word" viewBox="0 0 1000 130" aria-hidden="true" preserveAspectRatio="xMidYMax meet">
           <defs><linearGradient id="fw" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".14"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient></defs>
@@ -115,6 +112,13 @@ export function renderChrome() {
     });
     io.observe(footer);
   }
+
+  const hint = footer.querySelector('.hint');
+  hint.querySelector('.hint__btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    hint.classList.toggle('open');
+  });
+  document.addEventListener('click', () => hint.classList.remove('open'));
 
   initReveal();
   initSpotlight();
@@ -177,321 +181,17 @@ export function countUp(node, value, duration = 1200) {
   requestAnimationFrame(step);
 }
 
-// Эффект «печатающегося» текста (для хешей и квитанций).
-// Конфетти в фирменных цветах.
-export function confetti() {
-  if (reduceMotion()) return;
-  const canvas = el('<canvas class="confetti"></canvas>');
-  document.body.append(canvas);
-  const ctx = canvas.getContext('2d');
-  const dpr = Math.min(2, devicePixelRatio || 1);
-  const resize = () => {
-    canvas.width = innerWidth * dpr;
-    canvas.height = innerHeight * dpr;
-  };
-  resize();
-  const colors = ['#22c7f2', '#3cf0b4', '#2a5bd7', '#ffffff', '#8be9ff'];
-  const parts = Array.from({ length: 160 }, () => ({
-    x: innerWidth / 2 + (Math.random() - 0.5) * 120,
-    y: innerHeight * 0.35,
-    vx: (Math.random() - 0.5) * 16,
-    vy: -Math.random() * 14 - 4,
-    w: 6 + Math.random() * 6,
-    h: 3 + Math.random() * 5,
-    r: Math.random() * Math.PI,
-    vr: (Math.random() - 0.5) * 0.3,
-    c: colors[(Math.random() * colors.length) | 0],
-  }));
-  const start = performance.now();
-  const frame = (t) => {
-    const age = t - start;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    for (const p of parts) {
-      p.vy += 0.35;
-      p.vx *= 0.99;
-      p.x += p.vx;
-      p.y += p.vy;
-      p.r += p.vr;
-      ctx.save();
-      ctx.globalAlpha = Math.max(0, 1 - age / 3200);
-      ctx.translate(p.x * dpr, p.y * dpr);
-      ctx.rotate(p.r);
-      ctx.fillStyle = p.c;
-      ctx.fillRect((-p.w / 2) * dpr, (-p.h / 2) * dpr, p.w * dpr, p.h * dpr);
-      ctx.restore();
-    }
-    if (age < 3200) requestAnimationFrame(frame);
-    else canvas.remove();
-  };
-  requestAnimationFrame(frame);
-}
-
-// Звук салюта, синтезируется в браузере (Web Audio): свист ракеты,
-// раскатистый взрыв и треск искр. Создаётся по нажатию кнопки —
-// иначе браузеры не разрешают воспроизводить звук.
-export function fireworksSound() {
-  const AC = window.AudioContext || window.webkitAudioContext;
-  if (!AC) return null;
-  let ctx;
+// Полноэкранная загрузка «Отправляем ваш голос…»: держится не меньше minMs.
+export async function withOverlay(text, fn, minMs = 2000) {
+  const node = el(`<div class="sending" role="status" aria-live="polite"><div class="sending__box"><span class="sending__spin"></span><b>${escapeHtml(text)}</b></div></div>`);
+  document.body.append(node);
   try {
-    ctx = new AC();
-  } catch {
-    return null;
+    const [result] = await Promise.all([fn(), new Promise((r) => setTimeout(r, minMs))]);
+    return result;
+  } finally {
+    node.classList.add('closing');
+    setTimeout(() => node.remove(), 200);
   }
-  ctx.resume?.();
-  const master = ctx.createGain();
-  master.gain.value = 0.7;
-  const comp = ctx.createDynamicsCompressor();
-  master.connect(comp).connect(ctx.destination);
-
-  const noise = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
-  const data = noise.getChannelData(0);
-  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
-
-  const panner = (pan) => {
-    if (!ctx.createStereoPanner) return master;
-    const p = ctx.createStereoPanner();
-    p.pan.value = Math.max(-0.8, Math.min(0.8, pan));
-    p.connect(master);
-    return p;
-  };
-  const noiseSource = (offset = Math.random()) => {
-    const src = ctx.createBufferSource();
-    src.buffer = noise;
-    src.start(ctx.currentTime, offset);
-    return src;
-  };
-
-  return {
-    resume: () => ctx.resume?.(),
-    // Свист/шипение взлетающей ракеты.
-    launch(pan = 0) {
-      const t = ctx.currentTime;
-      const src = noiseSource();
-      const bp = ctx.createBiquadFilter();
-      bp.type = 'bandpass';
-      bp.Q.value = 6;
-      bp.frequency.setValueAtTime(500, t);
-      bp.frequency.exponentialRampToValueAtTime(3200, t + 1.1);
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.18, t + 0.15);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 1.2);
-      src.connect(bp).connect(g).connect(panner(pan));
-      src.stop(t + 1.3);
-    },
-    // Взрыв: глухой удар + раскат, у крупных — треск искр.
-    boom(pan = 0, big = false, crackle = false) {
-      const t = ctx.currentTime;
-      const src = noiseSource();
-      const lp = ctx.createBiquadFilter();
-      lp.type = 'lowpass';
-      lp.frequency.setValueAtTime(big ? 1600 : 1100, t);
-      lp.frequency.exponentialRampToValueAtTime(120, t + 1.4);
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(big ? 1.2 : 0.8, t);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + (big ? 2.2 : 1.5));
-      const out = panner(pan);
-      src.connect(lp).connect(g).connect(out);
-      src.stop(t + 2.3);
-
-      const osc = ctx.createOscillator();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(110, t);
-      osc.frequency.exponentialRampToValueAtTime(38, t + 0.45);
-      const og = ctx.createGain();
-      og.gain.setValueAtTime(big ? 0.9 : 0.6, t);
-      og.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
-      osc.connect(og).connect(out);
-      osc.start(t);
-      osc.stop(t + 0.55);
-
-      if (crackle) {
-        for (let i = 0; i < 28; i++) {
-          const ct = t + 0.35 + Math.random() * 1.4;
-          const c = noiseSource();
-          const hp = ctx.createBiquadFilter();
-          hp.type = 'highpass';
-          hp.frequency.value = 2500 + Math.random() * 3000;
-          const cg = ctx.createGain();
-          cg.gain.setValueAtTime(0.0001, ct);
-          cg.gain.exponentialRampToValueAtTime(0.08 + Math.random() * 0.12, ct + 0.005);
-          cg.gain.exponentialRampToValueAtTime(0.0001, ct + 0.05);
-          c.connect(hp).connect(cg).connect(out);
-          c.stop(ct + 0.06);
-        }
-      }
-    },
-    close: () => setTimeout(() => ctx.close?.(), 3000),
-  };
-}
-
-// Большой салют на весь экран: ракеты взлетают снизу и взрываются
-// разноцветными шарами, кольцами и «ивами» со светящимися хвостами.
-export function fireworks(duration = 7000, sound = null) {
-  if (reduceMotion()) {
-    sound?.close();
-    return;
-  }
-  const canvas = el('<canvas class="fireworks"></canvas>');
-  const flash = el('<div class="fireworks-flash"></div>');
-  document.body.append(canvas, flash);
-  const ctx = canvas.getContext('2d');
-  const dpr = Math.min(1.5, devicePixelRatio || 1);
-  let W = 0;
-  let H = 0;
-  const resize = () => {
-    W = innerWidth;
-    H = innerHeight;
-    canvas.width = W * dpr;
-    canvas.height = H * dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  };
-  resize();
-  addEventListener('resize', resize);
-
-  const palettes = [
-    ['#22c7f2', '#8be9ff', '#ffffff'],
-    ['#3cf0b4', '#b6ffe4', '#ffffff'],
-    ['#ffd166', '#ffb703', '#fff3c4'],
-    ['#ff5ea8', '#ffb3d9', '#ffffff'],
-    ['#a78bfa', '#ddd6fe', '#ffffff'],
-    ['#2a5bd7', '#22c7f2', '#3cf0b4'],
-    ['#ff6b35', '#ffd166', '#ffffff'],
-  ];
-  const rand = (a, b) => a + Math.random() * (b - a);
-  const pick = (arr) => arr[(Math.random() * arr.length) | 0];
-  const rockets = [];
-  const sparks = [];
-  const MAX_SPARKS = matchMedia('(max-width: 600px)').matches ? 1400 : 2600;
-
-  function launch(x = rand(W * 0.1, W * 0.9)) {
-    const targetY = rand(H * 0.12, H * 0.45);
-    rockets.push({ x, y: H + 10, vx: rand(-1.2, 1.2), vy: -Math.sqrt(2 * 0.12 * (H - targetY)) * rand(0.95, 1.05), trail: [], palette: pick(palettes) });
-    if (Math.random() < 0.7) sound?.launch((x / W) * 2 - 1);
-  }
-
-  function explode(r) {
-    const type = pick(['sphere', 'sphere', 'ring', 'willow', 'double']);
-    const count = type === 'ring' ? 70 : rand(110, 170) | 0;
-    const speed = rand(4.5, 7.5);
-    const add = (n, spd, colors, opts = {}) => {
-      for (let i = 0; i < n && sparks.length < MAX_SPARKS; i++) {
-        const a = (i / n) * Math.PI * 2 + rand(-0.05, 0.05);
-        const v = type === 'ring' ? spd : spd * Math.cbrt(Math.random());
-        sparks.push({
-          x: r.x,
-          y: r.y,
-          px: r.x,
-          py: r.y,
-          vx: Math.cos(a) * v,
-          vy: Math.sin(a) * v,
-          life: 1,
-          decay: opts.decay ?? rand(0.009, 0.016),
-          color: pick(colors),
-          size: opts.size ?? rand(1.4, 2.6),
-          gravity: opts.gravity ?? 0.06,
-          friction: opts.friction ?? 0.965,
-          flicker: Math.random() < 0.35,
-        });
-      }
-    };
-    if (type === 'willow') add(count, speed * 0.8, ['#ffd166', '#ffe8a3', '#ffb703'], { decay: rand(0.005, 0.008), gravity: 0.045, friction: 0.975, size: 1.6 });
-    else add(count, speed, r.palette);
-    if (type === 'double') add(60, speed * 0.45, [pick(pick(palettes))]);
-    sound?.boom((r.x / W) * 2 - 1, type === 'double' || type === 'willow', type === 'willow' || Math.random() < 0.35);
-    // вспышка в точке взрыва
-    sparks.push({ x: r.x, y: r.y, px: r.x, py: r.y, vx: 0, vy: 0, life: 1, decay: 0.08, color: '#ffffff', size: 26, gravity: 0, friction: 1, burst: true });
-    flash.style.opacity = '0.18';
-    setTimeout(() => (flash.style.opacity = '0'), 60);
-  }
-
-  // Первый залп — сразу несколько ракет, дальше — очередями.
-  for (let i = 0; i < 5; i++) setTimeout(() => launch(W * (0.15 + i * 0.175)), i * 120);
-  const start = performance.now();
-  let nextLaunch = start + 700;
-
-  let last = start;
-  const frame = (t) => {
-    const elapsed = t - start;
-    // Шаг времени в «кадрах по 60 fps»: на медленном телефоне салют идёт с той же скоростью.
-    const dt = Math.min(4, Math.max(0.25, (t - last) / 16.67));
-    last = t;
-    if (elapsed < duration && t >= nextLaunch) {
-      const volley = Math.random() < 0.3 ? 3 : 1;
-      for (let i = 0; i < volley; i++) launch();
-      nextLaunch = t + rand(220, 520);
-    }
-    ctx.clearRect(0, 0, W, H);
-    ctx.globalCompositeOperation = 'lighter';
-
-    for (let i = rockets.length - 1; i >= 0; i--) {
-      const r = rockets[i];
-      r.trail.push([r.x, r.y]);
-      if (r.trail.length > 10) r.trail.shift();
-      r.x += r.vx * dt;
-      r.y += r.vy * dt;
-      r.vy += 0.12 * dt;
-      ctx.beginPath();
-      ctx.moveTo(r.trail[0][0], r.trail[0][1]);
-      for (const [x, y] of r.trail) ctx.lineTo(x, y);
-      ctx.strokeStyle = 'rgba(255, 230, 180, 0.8)';
-      ctx.lineWidth = 2.2;
-      ctx.stroke();
-      if (r.vy >= -0.6) {
-        explode(r);
-        rockets.splice(i, 1);
-      }
-    }
-
-    for (let i = sparks.length - 1; i >= 0; i--) {
-      const p = sparks[i];
-      p.px = p.x;
-      p.py = p.y;
-      const f = Math.pow(p.friction, dt);
-      p.vx *= f;
-      p.vy = p.vy * f + p.gravity * dt;
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
-      p.life -= p.decay * dt;
-      if (p.life <= 0) {
-        sparks.splice(i, 1);
-        continue;
-      }
-      if (p.burst) {
-        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 4 * p.life + 1);
-        g.addColorStop(0, `rgba(255,255,255,${0.9 * p.life})`);
-        g.addColorStop(1, 'rgba(255,255,255,0)');
-        ctx.fillStyle = g;
-        ctx.fillRect(p.x - 120, p.y - 120, 240, 240);
-        continue;
-      }
-      const alpha = p.flicker && Math.random() < 0.3 ? p.life * 0.3 : p.life;
-      ctx.globalAlpha = alpha;
-      ctx.strokeStyle = p.color;
-      ctx.lineWidth = p.size;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(p.px - p.vx * 2, p.py - p.vy * 2);
-      ctx.lineTo(p.x, p.y);
-      ctx.stroke();
-      ctx.globalAlpha = alpha * 0.25;
-      ctx.fillStyle = p.color;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size * 3, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = 1;
-    }
-
-    if (elapsed < duration || rockets.length || sparks.length) requestAnimationFrame(frame);
-    else {
-      removeEventListener('resize', resize);
-      canvas.remove();
-      flash.remove();
-      sound?.close();
-    }
-  };
-  requestAnimationFrame(frame);
 }
 
 // Кнопка в состоянии загрузки: спиннер вместо текста «Загрузка…».
