@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Итоги — Выпускник 2026</title>
+  <link rel="icon" href="/img/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap">
+  <link rel="stylesheet" href="/css/style.css">
+  <script type="module" src="/js/page-results.js"></script>
+</head>
+<body>
+  <main>
+    <div class="container stack">
+      <div class="breadcrumbs"><a href="/">Главная</a> → Итоги</div>
+      <section class="card">
+        <h1>Итоги голосования</h1>
+        <div id="summary"><div class="spinner"></div></div>
+      </section>
+      <div id="questions" class="stack"></div>
+      <section class="card hidden" id="recount-card">
+        <h2>Независимый пересчёт</h2>
+        <p class="muted">Браузер скачает весь реестр, проверит цепочку блоков и подписи, расшифрует каждый бюллетень опубликованным ключом комиссии и сравнит итог с официальным.</p>
+        <div class="actions"><button class="btn btn--primary" id="recount">Пересчитать самостоятельно</button></div>
+        <div id="recount-report"></div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

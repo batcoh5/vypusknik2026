@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Управление — Выпускник 2026</title>
+  <link rel="icon" href="/img/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap">
+  <link rel="stylesheet" href="/css/style.css">
+  <script type="module" src="/js/page-admin.js"></script>
+</head>
+<body>
+  <main>
+    <div class="container stack">
+      <div class="breadcrumbs"><a href="/">Главная</a> → Управление</div>
+      <section class="card">
+        <h1>Управление голосованием</h1>
+        <p class="muted">Раздел для оргкомитета. Ключ администратора задаётся переменной окружения ADMIN_TOKEN.</p>
+        <form class="search-row" id="login">
+          <input class="input" type="password" id="token" placeholder="Ключ администратора" autocomplete="current-password">
+          <button class="btn btn--primary" type="submit">Войти</button>
+        </form>
+        <div id="panel"></div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

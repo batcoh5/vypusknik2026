@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Выпускник 2026 — голосование</title>
+  <meta name="description" content="Народное голосование проекта «Выпускник 2026» в Краснообске. Анонимно, с шифрованием и открытым реестром голосов.">
+  <link rel="icon" href="/img/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap">
+  <link rel="stylesheet" href="/css/style.css">
+  <script type="module" src="/js/page-index.js"></script>
+</head>
+<body>
+  <main>
+    <div class="container stack">
+      <section class="hero">
+        <svg class="hero__art" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 4 2 9l10 5 10-5-10-5Z" fill="#fff"/>
+          <path d="M6 11.2V15c0 1.7 2.7 3 6 3s6-1.3 6-3v-3.8l-6 3-6-3Z" fill="#fff"/>
+        </svg>
+        <div id="hero-status"></div>
+        <h1 id="hero-title">Выпускник 2026</h1>
+        <p id="hero-subtitle">Народное голосование проекта «Выпускник 2026» в Краснообске</p>
+        <div id="hero-countdown"></div>
+        <div class="hero__actions">
+          <a class="btn btn--white" href="/vote" id="hero-vote">Проголосовать</a>
+          <a class="btn btn--ghost-white" href="/verify">Проверить свой голос</a>
+        </div>
+      </section>
+
+      <section class="grid grid--3">
+        <div class="stat">
+          <div class="stat__value" id="stat-cast">—</div>
+          <div class="stat__label">бюллетеней в реестре</div>
+        </div>
+        <div class="stat">
+          <div class="stat__value" id="stat-issued">—</div>
+          <div class="stat__label">бюллетеней выдано</div>
+        </div>
+        <div class="stat">
+          <div class="stat__value stat__value--sm" id="stat-dates">—</div>
+          <div class="stat__label">сроки голосования</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Номинации</h2>
+        <p class="muted">В каждой номинации можно выбрать одного участника. Голосовать можно только один раз.</p>
+        <div class="grid grid--2" id="nominations"></div>
+      </section>
+
+      <section class="card" id="how">
+        <h2>Как защищён ваш голос</h2>
+        <p class="muted">Голосование устроено по принципам дистанционного электронного голосования: голос тайный, его нельзя подменить, и каждый может проверить результат.</p>
+        <div class="grid grid--2 steps-info">
+          <div class="step-info">
+            <div class="step-info__num">1</div>
+            <div>
+              <h3>Один человек — один бюллетень</h3>
+              <p>Бюллетень выдаётся один раз. Сейчас проверка идёт по устройству, скоро — по номеру телефона с кодом из SMS.</p>
+            </div>
+          </div>
+          <div class="step-info">
+            <div class="step-info__num">2</div>
+            <div>
+              <h3>Анонимность через слепую подпись</h3>
+              <p>Комиссия заверяет ваш бюллетень, не видя его. Поэтому голос в реестре невозможно связать с вами.</p>
+            </div>
+          </div>
+          <div class="step-info">
+            <div class="step-info__num">3</div>
+            <div>
+              <h3>Шифрование прямо в браузере</h3>
+              <p>Выбор шифруется на вашем устройстве ключом комиссии. До окончания голосования промежуточные итоги не видит никто.</p>
+            </div>
+          </div>
+          <div class="step-info">
+            <div class="step-info__num">4</div>
+            <div>
+              <h3>Открытый реестр и квитанция</h3>
+              <p>Каждый бюллетень записывается в цепочку блоков. По квитанции вы проверите, что голос учтён и не изменён.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Частые вопросы</h2>
+        <details class="faq">
+          <summary>Можно ли проголосовать повторно или изменить голос?</summary>
+          <p>Нет. Бюллетень выдаётся один раз, а каждая подпись комиссии принимается в реестр только один раз. Изменить отправленный голос нельзя.</p>
+        </details>
+        <details class="faq">
+          <summary>Что такое квитанция?</summary>
+          <p>Это уникальный номер блока с вашим зашифрованным бюллетенем в реестре. Он сохраняется на вашем устройстве и его можно скачать. По квитанции на странице «Проверить голос» видно, что бюллетень записан, не изменён и учтён.</p>
+        </details>
+        <details class="faq">
+          <summary>Может ли организатор узнать, за кого я проголосовал?</summary>
+          <p>Реестр избирателей и реестр бюллетеней разделены. Бюллетень заверяется слепой подписью, поэтому связать выданный бюллетень с записью в реестре нельзя. Сам выбор зашифрован до конца голосования.</p>
+        </details>
+        <details class="faq">
+          <summary>Как проверить, что итоги подсчитаны честно?</summary>
+          <p>После завершения комиссия публикует ключ расшифровки. На странице «Итоги» кнопка «Пересчитать самостоятельно» скачает весь реестр, проверит цепочку и подсчитает голоса прямо в вашем браузере.</p>
+        </details>
+      </section>
+    </div>
+  </main>
+</body>
+</html>
