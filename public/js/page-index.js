@@ -102,7 +102,7 @@ function showThanks(fresh, sound = null) {
     <div class="card card--pad center thanks">
       <div class="success-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
       <h2>${fresh ? 'Спасибо! Ваш голос учтён' : 'Вы уже проголосовали'}</h2>
-      <p class="muted top-gap-sm">${fresh ? `Ваш голос ${name}засчитан.` : `Ваш голос ${name}уже засчитан — проголосовать можно только один раз.`} Итоги объявят организаторы в группе конкурса.</p>
+      <p class="muted top-gap-sm">${fresh ? `Ваш голос ${name}засчитан.` : `Ваш голос ${name}уже засчитан — проголосовать можно только один раз.`}</p>
       <div class="actions">${vkButton}</div>
     </div>`);
   if (fresh) {
@@ -231,7 +231,7 @@ async function main() {
   setLead(`<b class="grad-text">${escapeHtml(election.title)}</b>${election.description ? `<br>${escapeHtml(election.description)}` : ''}`);
 
   if (election.status === 'finished') {
-    return showMessage(icons.check, 'Голосование завершено', 'Спасибо всем, кто голосовал! Итоги объявят организаторы в группе конкурса.', vkButton);
+    return showMessage(icons.check, 'Голосование завершено', 'Спасибо всем, кто голосовал!', vkButton);
   }
   if (election.endsAt) countdown(election.endsAt, Date.parse(serverTime) - Date.now());
 
