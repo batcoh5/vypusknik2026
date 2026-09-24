@@ -64,7 +64,10 @@ const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matche
 function brandHtml() {
   return `<a class="brand" href="/" aria-label="Выпускник Краснообска — на главную">
     <img class="brand__mark" src="/img/logo.jpg" alt="" width="32" height="32">
-    <span class="brand__text"><span class="brand__name">Выпускник</span><span class="brand__sub">Краснообска 2026</span></span>
+    <svg class="brand__word" viewBox="0 0 124 30" role="img" aria-label="Выпускник Краснообска 2026">
+      <text class="brand__name" x="0" y="13" textLength="124" lengthAdjust="spacingAndGlyphs">ВЫПУСКНИК</text>
+      <text class="brand__sub" x="0.5" y="27.5" textLength="123" lengthAdjust="spacing">КРАСНООБСКА 2026</text>
+    </svg>
   </a>`;
 }
 
@@ -122,7 +125,6 @@ export function renderChrome() {
           <div class="footer__about">
             ${brandHtml()}
             <p>Народное голосование ежегодного конкурса «Выпускник Краснообска» для выпускников 11-х классов школ рабочего посёлка Краснообск.</p>
-            <div class="footer__status" id="footer-status"><span class="sk sk--btn"></span></div>
           </div>
           <div>
             <h4>Голосование</h4>
@@ -162,19 +164,21 @@ export function renderChrome() {
     </footer>`);
   document.body.append(footer);
 
+  // «ВЫПУСКНИК» в подвале выезжает снизу, когда подвал появляется на экране.
+  const word = footer.querySelector('.footer__word');
+  if (reduceMotion() || !('IntersectionObserver' in window)) word.classList.add('in');
+  else {
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) {
+        word.classList.add('in');
+        io.disconnect();
+      }
+    });
+    io.observe(footer);
+  }
+
   initReveal();
   initSpotlight();
-}
-
-export function setFooterStatus(status) {
-  const box = document.getElementById('footer-status');
-  if (!box) return;
-  const map = {
-    active: '<span class="badge badge--live"><span class="dot dot--pulse"></span>Голосование идёт</span>',
-    finished: '<span class="badge badge--done"><span class="dot"></span>Итоги подведены</span>',
-    none: '<span class="badge"><span class="dot"></span>Голосование ещё не началось</span>',
-  };
-  box.innerHTML = map[status] ?? map.none;
 }
 
 // ---------- анимации ----------

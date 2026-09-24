@@ -1,8 +1,6 @@
 import {
   api,
   renderChrome,
-  setFooterStatus,
-  statusBadge,
   escapeHtml,
   formatDate,
   initials,
@@ -332,8 +330,7 @@ function stepReceipt(receipt, fresh = false) {
 async function main() {
   const { election: current } = await api('/api/current');
   if (!current || current.status !== 'active') {
-    setFooterStatus(current?.status ?? 'none');
-    document.getElementById('vote-status').innerHTML = statusBadge(current?.status ?? 'none');
+    document.getElementById('vote-status').textContent = 'Голосование';
     if (current?.status === 'finished') {
       document.getElementById('vote-title').textContent = current.title;
       return showMessage('info', 'Голосование завершено', 'Приём голосов окончен, итоги уже подведены.', `<a class="btn btn--brand" href="/results">Смотреть итоги ${icons.arrow}</a>`);
@@ -347,8 +344,7 @@ async function main() {
   }
 
   election = current;
-  setFooterStatus('active');
-  document.getElementById('vote-status').innerHTML = statusBadge('active');
+  document.getElementById('vote-status').textContent = 'Электронный бюллетень';
   document.getElementById('vote-title').textContent = election.title;
   keys = await loadPublicKeys(election.publicKeys);
   const session = await api(`/api/elections/${election.id}/session`);

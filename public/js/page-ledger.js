@@ -1,13 +1,11 @@
 import {
   api,
   renderChrome,
-  setFooterStatus,
   escapeHtml,
   formatDate,
   formatNumber,
   shortHash,
   fetchAllBlocks,
-  statusBadge,
   countUp,
   icons,
   note,
@@ -110,14 +108,12 @@ async function verifyAll(btn) {
 async function main() {
   const id = params.get('election');
   const res = id ? await api(`/api/elections/${id}`).catch(() => ({ election: null })) : await api('/api/current');
-  const current = id ? await api('/api/current').catch(() => ({})) : res;
-  setFooterStatus(current.election?.status ?? 'none');
   election = res.election;
   if (!election) {
-    document.getElementById('ledger-election').innerHTML = statusBadge('none');
+    document.getElementById('ledger-election').textContent = 'Реестр голосов';
     return empty('Реестр появится, когда начнётся голосование', 'Пока голосование не открыто, в реестре нет записей. Следите за новостями конкурса.');
   }
-  document.getElementById('ledger-election').innerHTML = `${statusBadge(election.status)}<span>${escapeHtml(election.title)}</span>`;
+  document.getElementById('ledger-election').textContent = election.title;
   keys = await loadPublicKeys(election.publicKeys);
   const { total } = await api(`/api/elections/${election.id}/ledger?limit=1`);
   const last = total ? (await api(`/api/elections/${election.id}/ledger?from=${total - 1}&limit=1`)).blocks[0] : null;
@@ -133,7 +129,7 @@ async function main() {
         <div><h3>Проверка целостности</h3><p class="small muted top-gap-xs">Браузер скачает весь реестр и проверит каждый блок: хеш, связь с предыдущим, подпись реестра и подпись комиссии.</p></div>
         <button class="btn btn--brand" id="verify-all">${icons.shield} Проверить цепочку</button>
       </div>
-      <div class="chain" id="chain"></div>
+      <div class="progress" id="chain" hidden><div class="progress__fill"></div></div>
       <div id="verify-report"></div>
     </div>
     <div class="card card--pad swap-in">

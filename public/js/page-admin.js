@@ -1,6 +1,5 @@
 import {
   renderChrome,
-  setFooterStatus,
   escapeHtml,
   formatDate,
   formatNumber,
@@ -137,7 +136,6 @@ async function showList() {
   }
   const { elections } = data;
   const active = elections.find((e) => e.status === 'active');
-  setFooterStatus(active ? 'active' : elections.some((e) => e.status === 'finished') ? 'finished' : 'none');
 
   render(`
     <div class="election-card__head">

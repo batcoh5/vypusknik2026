@@ -1,7 +1,6 @@
 import {
   api,
   renderChrome,
-  setFooterStatus,
   statusBadge,
   formatDate,
   escapeHtml,
@@ -79,7 +78,6 @@ function countdown(target, offset) {
 }
 
 function renderNoElection() {
-  setFooterStatus('none');
   document.getElementById('hero-status').innerHTML = statusBadge('none');
   document.getElementById('hero-lead').classList.remove('lead-sk');
   document.getElementById('hero-lead').innerHTML =
@@ -90,7 +88,6 @@ function renderNoElection() {
 }
 
 function renderElection(e, serverTime) {
-  setFooterStatus(e.status);
   document.getElementById('hero-status').innerHTML = statusBadge(e.status);
   const lead = document.getElementById('hero-lead');
   lead.classList.remove('lead-sk');

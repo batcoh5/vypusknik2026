@@ -244,23 +244,6 @@ p {
 .brand:hover .brand__mark {
   transform: rotate(-8deg) scale(1.06);
 }
-.brand__text {
-  display: flex;
-  flex-direction: column;
-  line-height: 1;
-}
-.brand__name {
-  font: 700 14px/1 var(--display);
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-}
-.brand__sub {
-  font-size: 10px;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: var(--muted);
-  margin-top: 4px;
-}
 
 .nav {
   position: relative;
@@ -940,6 +923,10 @@ main {
   background: var(--border);
 }
 .stat {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 6px;
   background: var(--bg-2);
   padding: 20px 22px;
 }
@@ -949,6 +936,11 @@ main {
   letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
   line-height: 1.1;
+}
+.stat__value {
+  display: flex;
+  align-items: center;
+  min-height: 34px;
 }
 .stat__value--sm {
   font-size: 16px;
@@ -1633,27 +1625,6 @@ fieldset.question {
   background: rgba(60, 240, 180, 0.07);
 }
 
-/* визуализация цепочки */
-.chain {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-top: 16px;
-}
-.chain__b {
-  width: 14px;
-  height: 14px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.08);
-  transition: background 0.3s, transform 0.3s var(--ease);
-}
-.chain__b.ok {
-  background: var(--mint);
-  transform: scale(1.1);
-}
-.chain__b.bad {
-  background: var(--danger);
-}
 
 /* ---------- итоги ---------- */
 
@@ -1693,14 +1664,6 @@ fieldset.question {
 .result-row.leader .bar__fill {
   background: var(--grad);
   box-shadow: 0 0 20px rgba(60, 240, 180, 0.4);
-}
-.crown {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: 8px;
-  font-size: 12px;
-  color: var(--mint);
 }
 
 /* ---------- FAQ ---------- */
@@ -2124,7 +2087,92 @@ fieldset.question {
     top: 88px;
   }
 }
-.crown svg {
-  width: 12px;
-  height: 12px;
+
+/* ---------- правки: итоги, прогресс, подвал ---------- */
+
+.stat__label {
+  margin-top: 0;
+}
+.result-row__name {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+.winner {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  margin-left: 6px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(60, 240, 180, 0.35);
+  background: rgba(60, 240, 180, 0.1);
+  color: var(--mint);
+  font-size: 12px;
+  font-weight: 600;
+  animation: pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 0.4s both;
+}
+.winner svg {
+  width: 13px;
+  height: 13px;
+}
+
+.progress {
+  height: 4px;
+  margin-top: 20px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  transition: opacity 0.6s;
+}
+.progress.done {
+  opacity: 0;
+}
+.progress__fill {
+  width: 0;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--grad);
+  box-shadow: 0 0 12px rgba(60, 240, 180, 0.5);
+  transition: width 0.3s var(--ease);
+}
+.progress__fill.bad {
+  background: var(--danger);
+}
+
+/* одна номинация — на всю ширину; нечётная последняя — тоже */
+@media (min-width: 768px) {
+  .nominations-grid > :last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+}
+
+/* «ВЫПУСКНИК» в подвале выезжает снизу и уходит за край */
+.footer__word {
+  margin-bottom: -4.2%;
+  opacity: 0;
+  transform: translateY(60%);
+  transition: transform 1.6s var(--ease), opacity 1.6s var(--ease);
+}
+.footer__word.in {
+  opacity: 1;
+  transform: none;
+}
+
+/* логотип: обе строки строго одной ширины */
+.brand__word {
+  display: block;
+  width: 124px;
+  height: 30px;
+  overflow: visible;
+}
+.brand__word .brand__name {
+  font: 700 14.5px var(--display);
+  fill: var(--text);
+}
+.brand__word .brand__sub {
+  font: 400 9px var(--font);
+  fill: var(--muted);
 }
