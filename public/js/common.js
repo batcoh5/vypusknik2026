@@ -1,18 +1,51 @@
-// Общие элементы страниц: шапка, подвал, запросы к API, локальное хранилище.
+// Общие элементы страниц: шапка, подвал, анимации, запросы к API, хранилище.
+
+export const VK_URL = 'https://vk.com/wkrasnoobskacontest';
 
 const NAV = [
   ['/', 'Главная'],
   ['/vote', 'Голосовать'],
   ['/verify', 'Проверить голос'],
-  ['/ledger', 'Реестр голосов'],
+  ['/ledger', 'Реестр'],
   ['/results', 'Итоги'],
 ];
 
-const LOGO_SVG = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-  <path d="M12 4 2 9l10 5 10-5-10-5Z" fill="#fff"/>
-  <path d="M6 11.2V15c0 1.7 2.7 3 6 3s6-1.3 6-3v-3.8l-6 3-6-3Z" fill="#fff" opacity=".8"/>
-  <path d="M21 9v5" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/>
-</svg>`;
+// ---------- иконки (Lucide-подобные, stroke) ----------
+
+const svg = (body, extra = '') =>
+  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ${extra}>${body}</svg>`;
+
+export const icons = {
+  arrow: svg('<path d="M5 12h14M13 6l6 6-6 6"/>', 'class="arrow"'),
+  external: svg('<path d="M7 17 17 7M8 7h9v9"/>'),
+  check: svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
+  x: svg('<path d="M6 6l12 12M18 6 6 18"/>'),
+  minus: svg('<path d="M6 12h12"/>'),
+  shield: svg('<path d="M12 3 4 6v6c0 5 3.4 8.4 8 9 4.6-.6 8-4 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/>'),
+  eyeOff: svg('<path d="M3 3l18 18M10.6 5.1A10.4 10.4 0 0 1 12 5c6 0 9.5 7 9.5 7a17 17 0 0 1-3.2 4M6.6 6.6A17 17 0 0 0 2.5 12S6 19 12 19a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>'),
+  lock: svg('<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'),
+  blocks: svg('<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M10 6.5h4M6.5 10v4M17.5 10v4M14 17.5h-4"/>'),
+  receipt: svg('<path d="M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2V3Z"/><path d="M9 8h6M9 12h6"/>'),
+  chart: svg('<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>'),
+  user: svg('<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>'),
+  clock: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
+  info: svg('<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>'),
+  alert: svg('<path d="M12 3 2 20h20L12 3Z"/><path d="M12 10v4M12 17h.01"/>'),
+  copy: svg('<rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>'),
+  download: svg('<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>'),
+  upload: svg('<path d="M12 21V9M7 14l5-5 5 5M4 3h16"/>'),
+  search: svg('<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>'),
+  plus: svg('<path d="M12 5v14M5 12h14"/>'),
+  trash: svg('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>'),
+  edit: svg('<path d="M4 20h4L19 9l-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/>'),
+  play: svg('<path d="M7 4v16l13-8L7 4Z"/>'),
+  stop: svg('<rect x="6" y="6" width="12" height="12" rx="2"/>'),
+  crown: svg('<path d="M3 8l4 4 5-7 5 7 4-4-2 11H5L3 8Z"/>'),
+  vk: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13.1 18.5c-6.2 0-9.8-4.3-9.9-11.4h3.1c.1 5.2 2.4 7.4 4.2 7.9V7.1h2.9v4.5c1.8-.2 3.7-2.2 4.3-4.5h2.9c-.5 2.8-2.5 4.8-4 5.6 1.5.7 3.8 2.5 4.7 5.8h-3.2c-.7-2.2-2.4-3.9-4.7-4.1v4.1h-.3Z"/></svg>',
+  hat: svg('<path d="M12 4 2 9l10 5 10-5-10-5Z"/><path d="M6 11.5V16c0 1.7 2.7 3 6 3s6-1.3 6-3v-4.5"/>'),
+};
+
+// ---------- утилиты DOM ----------
 
 export function el(html) {
   const t = document.createElement('template');
@@ -24,58 +57,334 @@ export function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
 
+const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// ---------- шапка, подвал, фон ----------
+
+function brandHtml() {
+  return `<a class="brand" href="/" aria-label="Выпускник Краснообска — на главную">
+    <img class="brand__mark" src="/img/logo.jpg" alt="" width="32" height="32">
+    <span class="brand__text"><span class="brand__name">Выпускник</span><span class="brand__sub">Краснообска 2026</span></span>
+  </a>`;
+}
+
 export function renderChrome() {
   const path = location.pathname.replace(/\.html$/, '').replace(/\/index$/, '/') || '/';
+
+  document.body.prepend(
+    el(`<div class="glows" aria-hidden="true"><div class="grid-bg"></div><div class="glow glow--a"></div><div class="glow glow--b"></div><div class="glow glow--c"></div></div>`),
+  );
+
   const header = el(`
     <header class="header">
       <div class="container header__inner">
-        <a class="logo" href="/">
-          <span class="logo__mark">${LOGO_SVG}</span>
-          <span>
-            <span class="logo__title">Выпускник 2026</span><br>
-            <span class="logo__sub">Голосование · Краснообск</span>
-          </span>
-        </a>
-        <button class="nav-toggle" aria-label="Меню" aria-expanded="false">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
-        </button>
-        <nav class="nav">
+        ${brandHtml()}
+        <nav class="nav" aria-label="Основная навигация">
+          <span class="nav__pill"></span>
           ${NAV.map(([href, label]) => `<a href="${href}"${href === path ? ' class="active" aria-current="page"' : ''}>${label}</a>`).join('')}
         </nav>
+        <button class="nav-toggle" aria-label="Меню" aria-expanded="false"><span></span><span></span><span></span></button>
       </div>
     </header>`);
+  document.body.prepend(header);
+
   const toggle = header.querySelector('.nav-toggle');
   const nav = header.querySelector('.nav');
   toggle.addEventListener('click', () => {
     const open = nav.classList.toggle('open');
     toggle.setAttribute('aria-expanded', String(open));
   });
-  document.body.prepend(header);
 
-  document.body.append(
-    el(`
+  // «Пилюля», которая плавно переезжает под пункт меню.
+  const pill = nav.querySelector('.nav__pill');
+  const moveTo = (a) => {
+    if (!a) {
+      pill.style.opacity = '0';
+      return;
+    }
+    pill.style.width = a.offsetWidth + 'px';
+    pill.style.transform = `translateX(${a.offsetLeft}px)`;
+    pill.style.opacity = '1';
+  };
+  const active = nav.querySelector('a.active');
+  nav.querySelectorAll('a').forEach((a) => a.addEventListener('mouseenter', () => moveTo(a)));
+  nav.addEventListener('mouseleave', () => moveTo(active));
+  requestAnimationFrame(() => moveTo(active));
+
+  const onScroll = () => header.classList.toggle('scrolled', scrollY > 8);
+  addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+
+  const footer = el(`
     <footer class="footer">
-      <div class="container footer__inner">
-        <div>
-          <div><b class="footer__title">Выпускник 2026</b></div>
-          <div>Народное голосование · р.п. Краснообск</div>
+      <div class="container">
+        <div class="footer__grid">
+          <div class="footer__about">
+            ${brandHtml()}
+            <p>Народное голосование ежегодного конкурса «Выпускник Краснообска» для выпускников 11-х классов школ рабочего посёлка Краснообск.</p>
+            <div class="footer__status" id="footer-status"><span class="sk sk--btn"></span></div>
+          </div>
+          <div>
+            <h4>Голосование</h4>
+            <ul>
+              <li><a href="/vote">Проголосовать</a></li>
+              <li><a href="/verify">Проверить голос</a></li>
+              <li><a href="/ledger">Открытый реестр</a></li>
+              <li><a href="/results">Итоги</a></li>
+            </ul>
+          </div>
+          <div>
+            <h4>Конкурс</h4>
+            <ul>
+              <li><a href="${VK_URL}" target="_blank" rel="noopener">Группа ВКонтакте ${icons.external}</a></li>
+              <li><a href="/#how">Как защищён голос</a></li>
+              <li><a href="/#faq">Вопросы и ответы</a></li>
+            </ul>
+          </div>
+          <div>
+            <h4>Организаторы</h4>
+            <ul>
+              <li>Администрация р.п. Краснообск</li>
+              <li>МБУ «Дом культуры»</li>
+              <li>Молодёжный Краснообск</li>
+            </ul>
+          </div>
         </div>
-        <div>
-          <div><a href="/verify">Проверить свой голос</a></div>
-          <div><a href="/ledger">Открытый реестр бюллетеней</a></div>
-          <div><a href="/#how">Как защищён голос</a></div>
+        <div class="footer__bottom">
+          <span>© ${new Date().getFullYear()} «Выпускник Краснообска». Все права защищены.</span>
+          <span>Голоса защищены шифрованием и открытым реестром</span>
         </div>
-        <div>© ${new Date().getFullYear()} Оргкомитет проекта «Выпускник 2026»</div>
+        <svg class="footer__word" viewBox="0 0 1000 130" aria-hidden="true" preserveAspectRatio="xMidYMax meet">
+          <defs><linearGradient id="fw" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".14"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient></defs>
+          <text x="500" y="126" text-anchor="middle" textLength="990" lengthAdjust="spacingAndGlyphs" fill="url(#fw)">ВЫПУСКНИК</text>
+        </svg>
       </div>
-    </footer>`),
+    </footer>`);
+  document.body.append(footer);
+
+  initReveal();
+  initSpotlight();
+}
+
+export function setFooterStatus(status) {
+  const box = document.getElementById('footer-status');
+  if (!box) return;
+  const map = {
+    active: '<span class="badge badge--live"><span class="dot dot--pulse"></span>Голосование идёт</span>',
+    finished: '<span class="badge badge--done"><span class="dot"></span>Итоги подведены</span>',
+    none: '<span class="badge"><span class="dot"></span>Голосование ещё не началось</span>',
+  };
+  box.innerHTML = map[status] ?? map.none;
+}
+
+// ---------- анимации ----------
+
+let revealObserver;
+export function initReveal(root = document) {
+  const items = root.querySelectorAll('[data-reveal]:not(.in)');
+  // Задержки задаются через data-d: CSP запрещает inline-стили в разметке.
+  items.forEach((i) => i.dataset.d && i.style.setProperty('--d', i.dataset.d + 'ms'));
+  if (reduceMotion() || !('IntersectionObserver' in window)) {
+    items.forEach((i) => i.classList.add('in'));
+    return;
+  }
+  revealObserver ??= new IntersectionObserver(
+    (entries) => {
+      for (const e of entries) {
+        if (e.isIntersecting) {
+          e.target.classList.add('in');
+          revealObserver.unobserve(e.target);
+        }
+      }
+    },
+    { rootMargin: '0px 0px -8% 0px', threshold: 0.08 },
+  );
+  items.forEach((i) => revealObserver.observe(i));
+}
+
+// Подсветка карточки, следующая за курсором.
+function initSpotlight() {
+  document.addEventListener(
+    'pointermove',
+    (e) => {
+      const card = e.target.closest?.('.spot');
+      if (!card) return;
+      const r = card.getBoundingClientRect();
+      card.style.setProperty('--mx', `${e.clientX - r.left}px`);
+      card.style.setProperty('--my', `${e.clientY - r.top}px`);
+    },
+    { passive: true },
   );
 }
 
-export async function api(path, { method = 'GET', body } = {}) {
+// Плавный счётчик чисел.
+export function countUp(node, value, duration = 1200) {
+  const to = Number(value) || 0;
+  if (reduceMotion() || to === 0) {
+    node.textContent = formatNumber(to);
+    return;
+  }
+  const start = performance.now();
+  const step = (t) => {
+    const p = Math.min(1, (t - start) / duration);
+    const eased = 1 - Math.pow(1 - p, 4);
+    node.textContent = formatNumber(Math.round(to * eased));
+    if (p < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+// Эффект «печатающегося» текста (для хешей и квитанций).
+export function typeText(node, text, speed = 12) {
+  if (reduceMotion()) {
+    node.textContent = text;
+    return Promise.resolve();
+  }
+  node.textContent = '';
+  node.classList.add('typing');
+  return new Promise((resolve) => {
+    let i = 0;
+    const tick = () => {
+      i += 2;
+      node.textContent = text.slice(0, i);
+      if (i < text.length) setTimeout(tick, speed);
+      else {
+        node.classList.remove('typing');
+        resolve();
+      }
+    };
+    tick();
+  });
+}
+
+// Конфетти в фирменных цветах.
+export function confetti() {
+  if (reduceMotion()) return;
+  const canvas = el('<canvas class="confetti"></canvas>');
+  document.body.append(canvas);
+  const ctx = canvas.getContext('2d');
+  const dpr = Math.min(2, devicePixelRatio || 1);
+  const resize = () => {
+    canvas.width = innerWidth * dpr;
+    canvas.height = innerHeight * dpr;
+  };
+  resize();
+  const colors = ['#22c7f2', '#3cf0b4', '#2a5bd7', '#ffffff', '#8be9ff'];
+  const parts = Array.from({ length: 160 }, () => ({
+    x: innerWidth / 2 + (Math.random() - 0.5) * 120,
+    y: innerHeight * 0.35,
+    vx: (Math.random() - 0.5) * 16,
+    vy: -Math.random() * 14 - 4,
+    w: 6 + Math.random() * 6,
+    h: 3 + Math.random() * 5,
+    r: Math.random() * Math.PI,
+    vr: (Math.random() - 0.5) * 0.3,
+    c: colors[(Math.random() * colors.length) | 0],
+  }));
+  const start = performance.now();
+  const frame = (t) => {
+    const age = t - start;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (const p of parts) {
+      p.vy += 0.35;
+      p.vx *= 0.99;
+      p.x += p.vx;
+      p.y += p.vy;
+      p.r += p.vr;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, 1 - age / 3200);
+      ctx.translate(p.x * dpr, p.y * dpr);
+      ctx.rotate(p.r);
+      ctx.fillStyle = p.c;
+      ctx.fillRect((-p.w / 2) * dpr, (-p.h / 2) * dpr, p.w * dpr, p.h * dpr);
+      ctx.restore();
+    }
+    if (age < 3200) requestAnimationFrame(frame);
+    else canvas.remove();
+  };
+  requestAnimationFrame(frame);
+}
+
+// Кнопка в состоянии загрузки: спиннер вместо текста «Загрузка…».
+export async function withLoading(button, fn) {
+  const html = button.innerHTML;
+  button.classList.add('is-loading');
+  button.innerHTML = `<span class="spin"></span>${button.dataset.loading ?? ''}`;
+  try {
+    return await fn();
+  } finally {
+    button.classList.remove('is-loading');
+    button.innerHTML = html;
+  }
+}
+
+export function shake(node) {
+  node.classList.remove('shake');
+  void node.offsetWidth;
+  node.classList.add('shake');
+}
+
+// ---------- скелетоны ----------
+
+export const skeleton = {
+  card: () => `<div class="card card--pad stack"><div class="sk sk--title"></div><div>${skeleton.lines(2)}</div></div>`,
+  lines: (n = 3) => Array.from({ length: n }, (_, i) => `<div class="sk sk--line${i === n - 1 ? ' sk--short' : ''}"></div>`).join(''),
+  blocks: (n = 3) => Array.from({ length: n }, () => '<div class="sk sk--block"></div>').join(''),
+};
+
+// ---------- уведомления и диалоги ----------
+
+export function toast(text) {
+  const node = el(`<div class="toast" role="status"><span class="dot"></span>${escapeHtml(text)}</div>`);
+  document.body.append(node);
+  setTimeout(() => {
+    node.classList.add('out');
+    setTimeout(() => node.remove(), 300);
+  }, 2400);
+}
+
+export function confirmDialog({ title, text, ok = 'Подтвердить', danger = false }) {
+  return new Promise((resolve) => {
+    const modal = el(`
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal__box">
+          <h3>${escapeHtml(title)}</h3>
+          <p>${escapeHtml(text)}</p>
+          <div class="actions">
+            <button class="btn ${danger ? 'btn--danger' : 'btn--primary'}" data-ok>${escapeHtml(ok)}</button>
+            <button class="btn btn--ghost" data-cancel>Отмена</button>
+          </div>
+        </div>
+      </div>`);
+    const close = (value) => {
+      modal.classList.add('closing');
+      setTimeout(() => modal.remove(), 200);
+      removeEventListener('keydown', onKey);
+      resolve(value);
+    };
+    const onKey = (e) => e.key === 'Escape' && close(false);
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal || e.target.closest('[data-cancel]')) close(false);
+      if (e.target.closest('[data-ok]')) close(true);
+    });
+    addEventListener('keydown', onKey);
+    document.body.append(modal);
+    modal.querySelector('[data-ok]').focus();
+  });
+}
+
+export function note(kind, title, text, icon) {
+  const ic = icon ?? { success: icons.check, danger: icons.alert, warning: icons.alert }[kind] ?? icons.info;
+  return `<div class="note note--${kind}"><span class="note__icon">${ic}</span><div><b>${title}</b>${text ? `<p>${text}</p>` : ''}</div></div>`;
+}
+
+// ---------- API ----------
+
+export async function api(path, { method = 'GET', body, headers = {} } = {}) {
   const res = await fetch(path, {
     method,
     credentials: 'same-origin',
-    headers: body ? { 'Content-Type': 'application/json' } : {},
+    headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers },
     body: body ? JSON.stringify(body) : undefined,
   });
   let data = null;
@@ -91,6 +400,20 @@ export async function api(path, { method = 'GET', body } = {}) {
     throw err;
   }
   return data;
+}
+
+// Загружает все блоки реестра голосования постранично.
+export async function fetchAllBlocks(electionId, onProgress) {
+  const blocks = [];
+  let total = Infinity;
+  while (blocks.length < total) {
+    const page = await api(`/api/elections/${electionId}/ledger?from=${blocks.length}&limit=500`);
+    total = page.total;
+    if (!page.blocks.length) break;
+    blocks.push(...page.blocks);
+    onProgress?.(blocks.length, total);
+  }
+  return blocks;
 }
 
 // Локальное хранилище может быть недоступно (приватный режим) — не падаем.
@@ -118,28 +441,28 @@ export const store = {
   },
 };
 
-export const STATUS_LABEL = {
-  upcoming: ['Скоро начнётся', 'badge--warning'],
-  active: ['Голосование идёт', 'badge--success'],
-  ended: ['Голосование завершено', 'badge--muted'],
-};
+export const receiptKey = (electionId) => `receipt:${electionId}`;
+export const pendingKey = (electionId) => `pending:${electionId}`;
+
+// ---------- форматирование ----------
 
 export function statusBadge(status) {
-  const [label, cls] = STATUS_LABEL[status] ?? ['—', 'badge--muted'];
-  return `<span class="badge ${cls}">${label}</span>`;
+  if (status === 'active') return '<span class="badge badge--live"><span class="dot dot--pulse"></span>Голосование идёт</span>';
+  if (status === 'finished') return '<span class="badge badge--done"><span class="dot"></span>Голосование завершено</span>';
+  if (status === 'draft') return '<span class="badge badge--draft"><span class="dot"></span>Черновик</span>';
+  return '<span class="badge"><span class="dot"></span>Ещё не началось</span>';
 }
 
 const dateFmt = new Intl.DateTimeFormat('ru-RU', {
   day: 'numeric',
   month: 'long',
-  year: 'numeric',
   hour: '2-digit',
   minute: '2-digit',
   timeZone: 'Asia/Novosibirsk',
 });
 
 export function formatDate(iso) {
-  return dateFmt.format(new Date(iso)) + ' (Нск)';
+  return iso ? dateFmt.format(new Date(iso)) : '—';
 }
 
 export function formatNumber(n) {
@@ -155,19 +478,25 @@ export function plural(n, one, few, many) {
 }
 
 export function shortHash(hash) {
-  return hash ? `${hash.slice(0, 10)}…${hash.slice(-6)}` : '';
+  return hash ? `${hash.slice(0, 8)}…${hash.slice(-6)}` : '';
 }
 
-export function toast(text) {
-  const node = el(`<div class="toast" role="status">${escapeHtml(text)}</div>`);
-  document.body.append(node);
-  setTimeout(() => node.remove(), 2500);
+export function initials(name) {
+  return (
+    String(name)
+      .replace(/[«»"№·().,]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => /^[A-Za-zА-Яа-яЁё0-9]/.test(w))
+      .slice(0, 2)
+      .map((w) => w[0].toUpperCase())
+      .join('') || '•'
+  );
 }
 
 export async function copyText(text) {
   try {
     await navigator.clipboard.writeText(text);
-    toast('Скопировано');
+    toast('Скопировано в буфер обмена');
   } catch {
     toast('Не удалось скопировать');
   }
@@ -181,30 +510,3 @@ export function downloadJson(filename, data) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
-
-export function initials(name) {
-  return name
-    .replace(/[«»"№·]/g, ' ')
-    .split(/\s+/)
-    .filter((w) => /^[A-Za-zА-Яа-яЁё0-9]/.test(w))
-    .slice(0, 2)
-    .map((w) => w[0].toUpperCase())
-    .join('');
-}
-
-// Загружает все блоки реестра постранично.
-export async function fetchAllBlocks(onProgress) {
-  const blocks = [];
-  let total = Infinity;
-  while (blocks.length < total) {
-    const page = await api(`/api/ledger?from=${blocks.length}&limit=500`);
-    total = page.total;
-    if (!page.blocks.length) break;
-    blocks.push(...page.blocks);
-    onProgress?.(blocks.length, total);
-  }
-  return blocks;
-}
-
-export const RECEIPT_KEY = 'receipt';
-export const PENDING_KEY = 'pending';

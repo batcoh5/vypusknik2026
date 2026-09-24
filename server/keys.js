@@ -1,24 +1,37 @@
-// Ключи комиссии. Создаются при первом запуске и хранятся в DATA_DIR/keys.json.
+// Ключи.
+// Для каждого голосования создаётся свой комплект ключей комиссии:
 //  - blindSign: RSA-2048, слепая подпись анонимных токенов избирателей;
 //  - election:  ECDH P-256, шифрование бюллетеней (закрытая часть публикуется
-//               только после окончания голосования);
-//  - ledger:    ECDSA P-256, подпись блоков реестра (квитанции избирателей);
-//  - hmac:      секрет для хеширования идентификаторов избирателей.
+//               только после завершения голосования);
+//  - ledger:    ECDSA P-256, подпись блоков реестра (квитанции избирателей).
+// Общий для сайта секрет HMAC хранится в DATA_DIR/secret.json.
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-function generate() {
+export function loadSecret(dataDir) {
+  const file = path.join(dataDir, 'secret.json');
+  let secret;
+  if (fs.existsSync(file)) {
+    secret = JSON.parse(fs.readFileSync(file, 'utf8')).hmac;
+  } else {
+    secret = crypto.randomBytes(32).toString('hex');
+    fs.writeFileSync(file, JSON.stringify({ hmac: secret }, null, 2), { mode: 0o600 });
+  }
+  return {
+    hmac: (value) => crypto.createHmac('sha256', secret).update(value).digest('hex'),
+  };
+}
+
+export function generateElectionKeys() {
   const rsa = crypto.generateKeyPairSync('rsa', { modulusLength: 2048, publicExponent: 65537 });
   const election = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   const ledger = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   return {
-    createdAt: new Date().toISOString(),
     blindSign: rsa.privateKey.export({ format: 'jwk' }),
     election: election.privateKey.export({ format: 'jwk' }),
     ledger: ledger.privateKey.export({ format: 'jwk' }),
-    hmac: crypto.randomBytes(32).toString('hex'),
   };
 }
 
@@ -27,19 +40,11 @@ function publicJwk(jwk) {
   return { kty: 'EC', crv: jwk.crv, x: jwk.x, y: jwk.y };
 }
 
-export function loadKeys(dataDir) {
-  const file = path.join(dataDir, 'keys.json');
-  let raw;
-  if (fs.existsSync(file)) {
-    raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-  } else {
-    raw = generate();
-    fs.writeFileSync(file, JSON.stringify(raw, null, 2), { mode: 0o600 });
-  }
-
+export function electionCrypto(raw) {
   const rsaPrivate = crypto.createPrivateKey({ key: raw.blindSign, format: 'jwk' });
   const ledgerPrivate = crypto.createPrivateKey({ key: raw.ledger, format: 'jwk' });
-  const modulusBytes = Buffer.from(raw.blindSign.n, 'base64url').length;
+  const modulus = Buffer.from(raw.blindSign.n, 'base64url');
+  const n = BigInt('0x' + modulus.toString('hex'));
 
   return {
     public: {
@@ -52,22 +57,16 @@ export function loadKeys(dataDir) {
     // Подпись «вслепую»: s' = m'^d mod n (сырая операция RSA без паддинга).
     blindSign(blindedHex) {
       const input = Buffer.from(blindedHex, 'hex');
-      if (input.length !== modulusBytes) throw new Error('Неверная длина ослеплённого сообщения');
-      const n = BigInt('0x' + Buffer.from(raw.blindSign.n, 'base64url').toString('hex'));
+      if (input.length !== modulus.length) throw new Error('Неверная длина ослеплённого сообщения');
       const m = BigInt('0x' + blindedHex);
       if (m <= 1n || m >= n) throw new Error('Ослеплённое сообщение вне диапазона');
-      const out = crypto.privateDecrypt({ key: rsaPrivate, padding: crypto.constants.RSA_NO_PADDING }, input);
-      return out.toString('hex');
+      return crypto.privateDecrypt({ key: rsaPrivate, padding: crypto.constants.RSA_NO_PADDING }, input).toString('hex');
     },
 
     signBlock(hash) {
       return crypto
         .sign('sha256', Buffer.from(hash), { key: ledgerPrivate, dsaEncoding: 'ieee-p1363' })
         .toString('base64url');
-    },
-
-    hmac(value) {
-      return crypto.createHmac('sha256', raw.hmac).update(value).digest('hex');
     },
   };
 }

@@ -3,48 +3,26 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Реестр голосов — Выпускник 2026</title>
-  <link rel="icon" href="/img/favicon.svg" type="image/svg+xml">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap">
+  <title>Реестр голосов — Выпускник Краснообска 2026</title>
+  <meta name="theme-color" content="#0a0a0a">
+  <link rel="icon" href="/img/favicon.png" type="image/png">
+  <link rel="preload" href="/fonts/geist-cyrillic-57c931.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/fonts.css">
   <link rel="stylesheet" href="/css/style.css">
   <script type="module" src="/js/page-ledger.js"></script>
 </head>
 <body>
   <main>
-    <div class="container stack">
-      <div class="breadcrumbs"><a href="/">Главная</a> → Реестр голосов</div>
-      <section class="card">
-        <h1>Открытый реестр бюллетеней</h1>
-        <p class="muted">Каждый принятый бюллетень записывается в цепочку блоков: блок содержит хеш предыдущего, поэтому изменить или удалить запись незаметно нельзя. Бюллетени зашифрованы и не содержат данных об избирателях.</p>
-        <div class="grid grid--3">
-          <div class="stat"><div class="stat__value" id="total">—</div><div class="stat__label">блоков в реестре</div></div>
-          <div class="stat"><div class="stat__value stat__value--sm mono" id="last-hash">—</div><div class="stat__label">хеш последнего блока</div></div>
-          <div class="stat"><div class="stat__value stat__value--sm" id="chain-state"><span class="badge badge--muted">не проверялась</span></div><div class="stat__label">целостность цепочки</div></div>
-        </div>
-        <div class="actions">
-          <button class="btn btn--primary" id="verify-all">Проверить всю цепочку</button>
-        </div>
-        <div id="verify-report"></div>
-      </section>
-
-      <section class="card">
-        <h2>Блоки</h2>
-        <div class="table-wrap">
-          <table class="table">
-            <thead><tr><th>№</th><th>Время</th><th>Хеш блока</th><th>Предыдущий</th><th>Токен</th><th></th></tr></thead>
-            <tbody id="rows"></tbody>
-          </table>
-        </div>
-        <div class="actions" id="pager"></div>
-      </section>
-
-      <section class="card">
-        <h2>Открытые ключи комиссии</h2>
-        <p class="muted small">Отпечатки ключей (SHA-256). Сравните их с опубликованными организаторами.</p>
-        <dl class="kv small" id="keys"></dl>
-      </section>
+    <div class="container">
+      <div class="page-head" data-reveal>
+        <div class="eyebrow" id="ledger-election"><span class="sk badge-sk"></span></div>
+        <h1>Открытый реестр</h1>
+        <p>Каждый принятый бюллетень записывается в цепочку блоков: блок хранит хеш предыдущего, поэтому изменить или удалить запись незаметно нельзя. Бюллетени зашифрованы и не содержат данных об избирателях.</p>
+      </div>
+      <div id="ledger-root" class="stack">
+        <div class="stats"><div class="stat"><div class="sk sk--title"></div></div><div class="stat"><div class="sk sk--title"></div></div><div class="stat"><div class="sk sk--title"></div></div></div>
+        <div class="card card--pad"><div class="sk sk--block"></div><div class="sk sk--block"></div><div class="sk sk--block"></div></div>
+      </div>
     </div>
   </main>
 </body>

@@ -3,23 +3,27 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Страница не найдена — Выпускник 2026</title>
-  <link rel="icon" href="/img/favicon.svg" type="image/svg+xml">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap">
+  <title>Страница не найдена — Выпускник Краснообска 2026</title>
+  <meta name="theme-color" content="#0a0a0a">
+  <link rel="icon" href="/img/favicon.png" type="image/png">
+  <link rel="preload" href="/fonts/geist-cyrillic-57c931.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/fonts.css">
   <link rel="stylesheet" href="/css/style.css">
   <script type="module" src="/js/page-plain.js"></script>
 </head>
 <body>
   <main>
-    <div class="container">
-      <section class="card">
-        <h1>Страница не найдена</h1>
-        <p class="muted">Возможно, она была удалена или вы ошиблись в адресе.</p>
-        <div class="actions"><a class="btn btn--primary" href="/">На главную</a></div>
-      </section>
-    </div>
+    <section class="hero">
+      <div class="container hero__inner">
+        <div class="error-code grad-text" data-reveal>404</div>
+        <h2 data-reveal data-d="80">Страница не найдена</h2>
+        <p class="hero__lead" data-reveal data-d="160">Возможно, её удалили или в адресе опечатка.</p>
+        <div class="hero__actions" data-reveal data-d="240">
+          <a class="btn btn--primary btn--lg" href="/">На главную</a>
+          <a class="btn btn--glass btn--lg" href="/vote">К голосованию</a>
+        </div>
+      </div>
+    </section>
   </main>
 </body>
 </html>

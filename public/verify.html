@@ -3,34 +3,36 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Проверить голос — Выпускник 2026</title>
-  <link rel="icon" href="/img/favicon.svg" type="image/svg+xml">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap">
+  <title>Проверить голос — Выпускник Краснообска 2026</title>
+  <meta name="theme-color" content="#0a0a0a">
+  <link rel="icon" href="/img/favicon.png" type="image/png">
+  <link rel="preload" href="/fonts/geist-cyrillic-57c931.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/css/fonts.css">
   <link rel="stylesheet" href="/css/style.css">
   <script type="module" src="/js/page-verify.js"></script>
 </head>
 <body>
   <main>
-    <div class="container stack">
-      <div class="breadcrumbs"><a href="/">Главная</a> → Проверить голос</div>
-      <section class="card">
+    <div class="container">
+      <div class="page-head" data-reveal>
+        <div class="eyebrow">Квитанция</div>
         <h1>Проверить голос</h1>
-        <p class="muted">Введите номер квитанции, полученной после голосования, или загрузите файл квитанции. Проверка выполняется в вашем браузере.</p>
-        <form class="search-row" id="verify-form">
-          <input class="input input--mono" id="receipt-input" name="receipt" placeholder="Номер квитанции — 64 символа" autocomplete="off" spellcheck="false" maxlength="64">
-          <button class="btn btn--primary" type="submit">Проверить</button>
+        <p>Введите номер квитанции, полученной после голосования, или загрузите файл квитанции. Все проверки выполняются прямо в вашем браузере.</p>
+      </div>
+      <div class="card card--pad" data-reveal data-d="80">
+        <form class="row" id="verify-form">
+          <input class="input input--mono" id="receipt-input" placeholder="Номер квитанции — 64 символа" autocomplete="off" spellcheck="false" maxlength="64" aria-label="Номер квитанции">
+          <button class="btn btn--brand" type="submit" id="verify-btn">Проверить</button>
         </form>
         <div class="actions">
-          <label class="btn btn--link">
-            <input type="file" id="receipt-file" accept="application/json,.json" class="hidden">
-            Загрузить файл квитанции
+          <label class="btn btn--glass btn--sm">
+            <input type="file" id="receipt-file" accept="application/json,.json" class="sr-only">
+            <span id="upload-icon"></span> Загрузить файл квитанции
           </label>
-          <button class="btn btn--link hidden" id="use-saved" type="button">Использовать квитанцию с этого устройства</button>
+          <span id="saved"></span>
         </div>
-      </section>
-      <section id="result"></section>
+      </div>
+      <section id="result" class="top-gap-sm"></section>
     </div>
   </main>
 </body>

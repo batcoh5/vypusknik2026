@@ -10,13 +10,11 @@ import {
   bytesToHex,
   encryptBallot,
   importElectionPrivateKey,
-  decryptBallot,
   loadPublicKeys,
   randomBytes,
   tallyBlocks,
   unblindSignature,
   verifyBlock,
-  verifyTokenSignature,
 } from '../public/js/core.js';
 
 let app;
@@ -26,7 +24,7 @@ const ADMIN = 'test-admin-token';
 
 before(async () => {
   dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vyp-'));
-  app = await createApp({ dataDir, adminToken: ADMIN, now: () => new Date('2026-10-01T12:00:00Z') });
+  app = await createApp({ dataDir, adminToken: ADMIN });
   await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${app.server.address().port}`;
 });
@@ -55,123 +53,133 @@ function client() {
   };
 }
 
-async function vote(api, choices) {
-  const { data: info } = await api('GET', '/api/election');
-  const keys = await loadPublicKeys(info.publicKeys);
-  await api('GET', '/api/session');
+const admin = client();
+const asAdmin = (method, url, body) => admin(method, url, body, { authorization: `Bearer ${ADMIN}` });
+
+const SAMPLE = {
+  title: 'Выпускник года',
+  description: 'Тестовое голосование',
+  questions: [
+    { title: 'Выпускник года', candidates: [{ name: 'Анна' }, { name: 'Борис' }, { name: 'Вера' }] },
+    { title: 'Лучший класс', candidates: [{ name: '11 «А»' }, { name: '11 «Б»' }] },
+  ],
+};
+
+async function vote(api, electionId, choices) {
+  const { data } = await api('GET', `/api/elections/${electionId}`);
+  const keys = await loadPublicKeys(data.election.publicKeys);
+  await api('GET', `/api/elections/${electionId}/session`);
   const token = bytesToHex(randomBytes(32));
   const { blinded, r } = await blindToken(token, keys.rsaPub);
-  const signed = await api('POST', '/api/sign', { blinded });
+  const signed = await api('POST', `/api/elections/${electionId}/sign`, { blinded });
   if (signed.status !== 200) return { signed };
   const signature = unblindSignature(signed.data.blindSignature, r, keys.rsaPub);
-  const ballot = await encryptBallot(info.election.id, choices, keys.electionKey);
-  const cast = await api('POST', '/api/ballot', { token, signature, ballot });
+  const ballot = await encryptBallot(electionId, choices, keys.electionKey);
+  const cast = await api('POST', `/api/elections/${electionId}/ballot`, { token, signature, ballot });
   return { signed, cast, token, signature, ballot, keys };
 }
 
-test('полный цикл: выдача, голос, квитанция, повторное голосование запрещено', async () => {
+test('без запущенного голосования на сайте его нет', async () => {
+  const { data } = await client()('GET', '/api/current');
+  assert.equal(data.election, null);
+});
+
+test('админка требует ключ и проверяет данные', async () => {
   const api = client();
-  const r = await vote(api, { 'graduate-of-the-year': 'c2', 'best-class': 'k1' });
-  assert.equal(r.cast.status, 200);
-  assert.ok(await verifyTokenSignature(r.token, r.signature, r.keys.rsaPub));
+  assert.equal((await api('GET', '/api/admin/elections')).status, 401);
+  const bad = await asAdmin('POST', '/api/admin/elections', { title: 'X', questions: [{ title: 'Q', candidates: [{ name: 'один' }] }] });
+  assert.equal(bad.status, 400);
+});
 
-  const block = r.cast.data.block;
-  const checks = await verifyBlock(block, null, r.keys);
-  assert.equal(checks.ok, true, JSON.stringify(checks));
+test('полный цикл: создать, запустить, проголосовать, завершить, удалить, создать заново', async () => {
+  const created = await asAdmin('POST', '/api/admin/elections', SAMPLE);
+  assert.equal(created.status, 200);
+  const id = created.data.election.id;
+  assert.equal(created.data.election.status, 'draft');
 
-  const found = await api('GET', `/api/ledger/${block.hash}`);
-  assert.equal(found.status, 200);
-  assert.equal(found.data.block.ballot, r.ballot);
+  // Черновик не виден публично.
+  assert.equal((await client()('GET', '/api/current')).data.election, null);
+  assert.equal((await client()('GET', `/api/elections/${id}`)).status, 404);
+
+  // Черновик можно отредактировать.
+  const edited = await asAdmin('PUT', `/api/admin/elections/${id}`, { ...SAMPLE, title: 'Выпускник Краснообска 2026' });
+  assert.equal(edited.data.election.title, 'Выпускник Краснообска 2026');
+
+  assert.equal((await asAdmin('POST', `/api/admin/elections/${id}/start`)).status, 200);
+  assert.equal((await client()('GET', '/api/current')).data.election.id, id);
+  assert.equal((await asAdmin('PUT', `/api/admin/elections/${id}`, SAMPLE)).status, 409);
+  assert.equal((await asAdmin('DELETE', `/api/admin/elections/${id}`)).status, 409);
+
+  // Голосуем.
+  const alice = client();
+  const r1 = await vote(alice, id, { q1: 'c2', q2: 'c1' });
+  assert.equal(r1.cast.status, 200);
+  assert.equal((await verifyBlock(r1.cast.data.block, null, r1.keys)).ok, true);
+  assert.equal((await vote(client(), id, { q1: 'c2', q2: 'c2' })).cast.status, 200);
+  assert.equal((await vote(client(), id, { q1: 'c3', q2: 'c1' })).cast.status, 200);
 
   // Второй бюллетень с того же устройства не выдаётся.
-  const again = await vote(api, { 'graduate-of-the-year': 'c1', 'best-class': 'k1' });
-  assert.equal(again.signed.status, 409);
+  assert.equal((await vote(alice, id, { q1: 'c1', q2: 'c1' })).signed.status, 409);
 
-  // Повторная отправка того же бюллетеня идемпотентна.
-  const dup = await api('POST', '/api/ballot', { token: r.token, signature: r.signature, ballot: r.ballot });
-  assert.equal(dup.status, 200);
-  assert.equal(dup.data.block.hash, block.hash);
+  // Повторная отправка того же бюллетеня идемпотентна, другого — отклоняется.
+  const dup = await alice('POST', `/api/elections/${id}/ballot`, { token: r1.token, signature: r1.signature, ballot: r1.ballot });
+  assert.equal(dup.data.block.hash, r1.cast.data.block.hash);
+  const other = await encryptBallot(id, { q1: 'c1', q2: 'c1' }, r1.keys.electionKey);
+  assert.equal((await alice('POST', `/api/elections/${id}/ballot`, { token: r1.token, signature: r1.signature, ballot: other })).status, 409);
 
-  // Тот же токен с другим бюллетенем отклоняется.
-  const ballot2 = await encryptBallot('vypusknik-2026', { 'graduate-of-the-year': 'c1', 'best-class': 'k1' }, r.keys.electionKey);
-  const reuse = await api('POST', '/api/ballot', { token: r.token, signature: r.signature, ballot: ballot2 });
-  assert.equal(reuse.status, 409);
-});
-
-test('бюллетень без подписи комиссии отклоняется', async () => {
-  const api = client();
-  const { data: info } = await api('GET', '/api/election');
-  const keys = await loadPublicKeys(info.publicKeys);
-  const ballot = await encryptBallot(info.election.id, { 'graduate-of-the-year': 'c1', 'best-class': 'k1' }, keys.electionKey);
-  const res = await api('POST', '/api/ballot', {
+  // Поддельная подпись.
+  const forged = await client()('POST', `/api/elections/${id}/ballot`, {
     token: bytesToHex(randomBytes(32)),
     signature: bytesToHex(randomBytes(256)),
-    ballot,
+    ballot: other,
   });
-  assert.equal(res.status, 403);
-});
+  assert.equal(forged.status, 403);
 
-test('повтор запроса подписи с тем же сообщением возвращает ту же подпись', async () => {
-  const api = client();
-  const { data: info } = await api('GET', '/api/election');
-  const keys = await loadPublicKeys(info.publicKeys);
-  await api('GET', '/api/session');
-  const { blinded } = await blindToken(bytesToHex(randomBytes(32)), keys.rsaPub);
-  const a = await api('POST', '/api/sign', { blinded });
-  const b = await api('POST', '/api/sign', { blinded });
-  assert.equal(a.status, 200);
-  assert.equal(b.data.blindSignature, a.data.blindSignature);
-  const session = await api('GET', '/api/session');
-  assert.equal(session.data.ballotIssued, true);
-});
+  // Квитанция находится.
+  const receipt = await client()('GET', `/api/receipts/${r1.cast.data.block.hash}`);
+  assert.equal(receipt.data.election.id, id);
+  assert.equal(receipt.data.election.tally, null);
 
-test('итоги недоступны до завершения, затем публикуются вместе с ключом', async () => {
-  const voters = [
-    { 'graduate-of-the-year': 'c3', 'best-class': 'k2' },
-    { 'graduate-of-the-year': 'c3', 'best-class': 'k1' },
-  ];
-  for (const choices of voters) assert.equal((await vote(client(), choices)).cast.status, 200);
+  // Итоги скрыты до завершения.
+  assert.equal((await client()('GET', `/api/elections/${id}`)).data.election.tally, null);
 
-  const api = client();
-  assert.equal((await api('GET', '/api/results')).data.tally, null);
-  assert.equal((await api('POST', '/api/admin/close', {}, { authorization: 'Bearer wrong' })).status, 401);
-
-  const closed = await api('POST', '/api/admin/close', {}, { authorization: `Bearer ${ADMIN}` });
-  assert.equal(closed.status, 200);
-  const { tally } = closed.data;
+  const finished = await asAdmin('POST', `/api/admin/elections/${id}/finish`);
+  const tally = finished.data.election.tally;
   assert.equal(tally.valid, 3);
-  assert.equal(tally.counts['graduate-of-the-year'].c3, 2);
-  assert.equal(tally.counts['graduate-of-the-year'].c2, 1);
-  assert.equal(tally.counts['best-class'].k1, 2);
+  assert.equal(tally.counts.q1.c2, 2);
+  assert.equal(tally.counts.q1.c3, 1);
+  assert.equal(tally.counts.q2.c1, 2);
 
-  // Независимый пересчёт по опубликованному ключу даёт тот же результат.
-  const { data: info } = await api('GET', '/api/election');
-  assert.ok(info.electionPrivateKey);
-  const priv = await importElectionPrivateKey(info.electionPrivateKey);
-  const { data: ledger } = await api('GET', '/api/ledger?from=0&limit=500');
-  const recount = await tallyBlocks(info.election, ledger.blocks, priv);
-  assert.deepEqual(recount.counts, tally.counts);
-
-  // Цепочка целостна.
-  const keys = await loadPublicKeys(info.publicKeys);
+  // Независимый пересчёт по опубликованному ключу даёт тот же результат, цепочка целостна.
+  const { data: pub } = await client()('GET', `/api/elections/${id}`);
+  const priv = await importElectionPrivateKey(pub.election.electionPrivateKey);
+  const { data: ledger } = await client()('GET', `/api/elections/${id}/ledger?limit=500`);
+  assert.deepEqual((await tallyBlocks(pub.election, ledger.blocks, priv)).counts, tally.counts);
+  const keys = await loadPublicKeys(pub.election.publicKeys);
   let prev = null;
   for (const b of ledger.blocks) {
     assert.equal((await verifyBlock(b, prev, keys)).ok, true);
     prev = b;
   }
-  const first = await decryptBallot(ledger.blocks[0].ballot, priv);
-  assert.equal(first.choices['graduate-of-the-year'], 'c2');
-
-  // После завершения новые бюллетени не принимаются.
-  const late = await vote(client(), { 'graduate-of-the-year': 'c1', 'best-class': 'k1' });
-  assert.equal(late.signed.status, 403);
-});
-
-test('подмена блока обнаруживается', async () => {
-  const api = client();
-  const { data: info } = await api('GET', '/api/election');
-  const keys = await loadPublicKeys(info.publicKeys);
-  const { data: ledger } = await api('GET', '/api/ledger');
   const tampered = { ...ledger.blocks[0], ballot: ledger.blocks[1].ballot };
   assert.equal((await verifyBlock(tampered, null, keys)).ok, false);
+
+  // После завершения голоса не принимаются.
+  assert.equal((await vote(client(), id, { q1: 'c1', q2: 'c1' })).signed.status, 403);
+
+  // Удаление и новое голосование: тот же человек снова может проголосовать один раз.
+  assert.equal((await asAdmin('DELETE', `/api/admin/elections/${id}`)).status, 200);
+  assert.equal((await client()('GET', '/api/current')).data.election, null);
+  assert.equal((await client()('GET', `/api/receipts/${r1.cast.data.block.hash}`)).status, 404);
+
+  const second = (await asAdmin('POST', '/api/admin/elections', SAMPLE)).data.election.id;
+  await asAdmin('POST', `/api/admin/elections/${second}/start`);
+  assert.equal((await vote(alice, second, { q1: 'c1', q2: 'c1' })).cast.status, 200);
+  assert.equal((await vote(alice, second, { q1: 'c1', q2: 'c1' })).signed.status, 409);
+
+  // Одновременно может идти только одно голосование.
+  const third = (await asAdmin('POST', '/api/admin/elections', SAMPLE)).data.election.id;
+  assert.equal((await asAdmin('POST', `/api/admin/elections/${third}/start`)).status, 409);
+  const list = await asAdmin('GET', '/api/admin/elections');
+  assert.equal(list.data.elections.length, 2);
 });

@@ -1,7 +1,7 @@
 // Идентификация избирателя.
 //
 // Сейчас используется «защита по устройству»: подписанная httpOnly-cookie
-// с постоянным идентификатором + ограничение числа бюллетеней на один IP.
+// с постоянным идентификатором (+ необязательный лимит бюллетеней на IP).
 // Позже сюда добавится провайдер «phone»: после подтверждения SMS-кода
 // идентификатором станет номер телефона. Остальной код менять не придётся —
 // в реестр избирателей попадает только HMAC от идентификатора.
@@ -20,8 +20,8 @@ export function parseCookies(header = '') {
   return out;
 }
 
-export function createDeviceIdentity(keys, { secureCookies }) {
-  const sign = (id) => keys.hmac('cookie:' + id).slice(0, 32);
+export function createDeviceIdentity(secret, { secureCookies }) {
+  const sign = (id) => secret.hmac('cookie:' + id).slice(0, 32);
 
   function read(req) {
     const value = parseCookies(req.headers.cookie)[COOKIE];
@@ -50,10 +50,10 @@ export function createDeviceIdentity(keys, { secureCookies }) {
       return id;
     },
 
-    // Ключ для реестра избирателей (подпись выдаётся один раз на ключ).
+    // Ключ для реестра избирателей (подпись выдаётся один раз на ключ в каждом голосовании).
     identify(req) {
       const id = read(req);
-      return id ? keys.hmac('device:' + id) : null;
+      return id ? secret.hmac('device:' + id) : null;
     },
   };
 }
