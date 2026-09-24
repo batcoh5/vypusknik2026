@@ -55,7 +55,7 @@ const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matche
 
 function brandHtml() {
   return `<a class="brand" href="/" aria-label="Выпускник Краснообска — на главную">
-    <img class="brand__logo" src="/img/wordmark.png" alt="Выпускник Краснообска 2026" width="1210" height="374">
+    <img class="brand__logo" src="/img/wordmark.png" alt="Выпускник Краснообска 2026" width="150" height="46">
   </a>`;
 }
 
@@ -91,7 +91,7 @@ export function renderChrome() {
           <span>© ${new Date().getFullYear()} «Выпускник Краснообска». Все права защищены.</span>
           <span>Зрительское голосование</span>
         </div>
-        <img class="footer__word footer__logo" src="/img/wordmark.png" alt="" aria-hidden="true" width="1210" height="374">
+        <img class="footer__word footer__logo" src="/img/wordmark.png" alt="" aria-hidden="true" width="150" height="46">
       </div>
     </footer>`);
   document.body.append(footer);
