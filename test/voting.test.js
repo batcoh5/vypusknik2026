@@ -326,8 +326,8 @@ test('фото участников и итоги в Excel', async () => {
   fs.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
   // Распаковываем лист и проверяем формулу «голоса / всего × 160».
   const sheet = execFileSync('python3', ['-c', `import zipfile,sys;print(zipfile.ZipFile(sys.argv[1]).read('xl/worksheets/sheet1.xml').decode())`, file]).toString();
-  assert.match(sheet, /<f>IF\(\$D\$7=0,0,D4\/\$D\$7\*160\)<\/f><v>120<\/v>/);
-  assert.match(sheet, /<f>SUM\(D4:D6\)<\/f><v>4<\/v>/);
+  assert.match(sheet, /<f>IF\(\$C\$7=0,0,C4\/\$C\$7\*160\)<\/f><v>120<\/v>/);
+  assert.match(sheet, /<f>SUM\(C4:C6\)<\/f><v>4<\/v>/);
   assert.match(sheet, /Анна/);
 
   // Удаление голосования удаляет и фото.
