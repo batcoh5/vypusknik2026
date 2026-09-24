@@ -2613,8 +2613,3 @@ fieldset.question {
 .hero--compact .eyebrow--center {
   order: -1;
 }
-.brand__logo {
-  display: block;
-  width: 150px;
-  height: auto;
-}
