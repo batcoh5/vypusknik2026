@@ -2443,9 +2443,10 @@ fieldset.question {
 }
 @media (min-width: 860px) {
   .footer__grid {
-    grid-template-columns: minmax(0, 380px) auto;
+    grid-template-columns: minmax(0, 350px) auto;
     justify-content: start;
-    column-gap: 96px;
+    align-items: center;
+    column-gap: 56px;
   }
 }
 
