@@ -59,17 +59,18 @@ function showLogin(error = '') {
 
 // ---------- список голосований ----------
 
-// Итоги: голоса и баллы (голоса / всего × 160) — как в выгрузке Excel.
+// Итоги: голоса и баллы (голоса / всего × 160, с округлением) — как в выгрузке Excel.
 function resultsTable(e) {
   const q = e.questions[0];
   const counts = e.tally.counts[q.id];
   const total = q.candidates.reduce((n, c) => n + (counts[c.id] ?? 0), 0);
-  const rows = [...q.candidates]
-    .sort((a, b) => counts[b.id] - counts[a.id])
-    .map((c, i) => {
-      const v = counts[c.id] ?? 0;
-      const points = total ? (v / total) * 160 : 0;
-      return `<tr><td>${i + 1}</td><td>${escapeHtml(c.name)}</td><td class="num">${formatNumber(v)}</td><td class="num">${points.toFixed(2)}</td></tr>`;
+  // № — порядковый номер участника в голосовании, он не зависит от места.
+  const rows = q.candidates
+    .map((c, i) => ({ c, num: i + 1, v: counts[c.id] ?? 0 }))
+    .sort((a, b) => b.v - a.v || a.num - b.num)
+    .map(({ c, num, v }) => {
+      const points = total ? Math.round((v / total) * 160) : 0;
+      return `<tr><td>${num}</td><td>${escapeHtml(c.name)}</td><td class="num">${formatNumber(v)}</td><td class="num">${points}</td></tr>`;
     })
     .join('');
   return `
@@ -77,7 +78,7 @@ function resultsTable(e) {
       <table class="table results-table">
         <thead><tr><th>№</th><th>Участник</th><th class="num">Голоса</th><th class="num">Баллы из 160</th></tr></thead>
         <tbody>${rows}</tbody>
-        <tfoot><tr><td></td><td>Всего</td><td class="num">${formatNumber(total)}</td><td class="num">${total ? '160.00' : '0.00'}</td></tr></tfoot>
+        <tfoot><tr><td></td><td>Всего</td><td class="num">${formatNumber(total)}</td><td class="num">${total ? 160 : 0}</td></tr></tfoot>
       </table>
     </div>`;
 }
