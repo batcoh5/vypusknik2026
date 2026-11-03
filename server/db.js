@@ -1,12 +1,68 @@
-// Хранилище на встроенном SQLite (node:sqlite).
+// Хранилище. Два варианта с одинаковым (асинхронным) интерфейсом:
+//  - PostgreSQL — если задан DATABASE_URL (Timeweb, любой хостинг без постоянного диска);
+//  - SQLite (node:sqlite) — файл DATA_DIR/vote.db, если DATABASE_URL не задан.
+//
+// Таблицы:
 //  - elections:     голосования, их номинации и ключи комиссии;
 //  - voter_ballots: реестр избирателей — кому выдана слепая подпись (без бюллетеней);
-//  - ledger_blocks: реестр бюллетеней — анонимные зашифрованные голоса (без избирателей).
+//  - ledger_blocks: реестр бюллетеней — анонимные зашифрованные голоса (без избирателей);
+//  - photos:        фото участников (в SQLite-варианте — файлы в DATA_DIR/photos);
+//  - settings:      общий секрет сайта (в SQLite-варианте — файл DATA_DIR/secret.json).
 
-import { DatabaseSync } from 'node:sqlite';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 
-export function openDb(dataDir) {
+export const PHOTO_NAME_RE = /^[a-f0-9]{24}\.(jpg|png|webp)$/;
+
+export function toElection(r) {
+  return (
+    r && {
+      id: r.id,
+      title: r.title,
+      description: r.description,
+      questions: JSON.parse(r.questions),
+      status: r.status,
+      endsAt: r.ends_at,
+      createdAt: r.created_at,
+      startedAt: r.started_at,
+      finishedAt: r.finished_at,
+      keys: JSON.parse(r.keys),
+      tally: r.tally ? JSON.parse(r.tally) : null,
+      simulated: Number(r.simulated ?? 0),
+    }
+  );
+}
+
+export function toBlock(r) {
+  return (
+    r && {
+      electionId: r.election_id,
+      index: Number(r.idx),
+      timestamp: r.timestamp,
+      prevHash: r.prev_hash,
+      token: r.token,
+      signature: r.signature,
+      ballot: r.ballot,
+      hash: r.hash,
+      ledgerSignature: r.ledger_sig,
+    }
+  );
+}
+
+export async function openStorage({ dataDir, databaseUrl, log = console }) {
+  if (databaseUrl) {
+    const { openPostgres } = await import('./db-pg.js');
+    return openPostgres({ databaseUrl, dataDir, log });
+  }
+  fs.mkdirSync(dataDir, { recursive: true });
+  return openSqlite(dataDir);
+}
+
+// ---------- SQLite ----------
+
+export async function openSqlite(dataDir) {
+  const { DatabaseSync } = await import('node:sqlite');
   const db = new DatabaseSync(path.join(dataDir, 'vote.db'));
   db.exec(`
     PRAGMA journal_mode = WAL;
@@ -89,73 +145,88 @@ export function openDb(dataDir) {
     ),
   };
 
-  const toElection = (r) =>
-    r && {
-      id: r.id,
-      title: r.title,
-      description: r.description,
-      questions: JSON.parse(r.questions),
-      status: r.status,
-      endsAt: r.ends_at,
-      createdAt: r.created_at,
-      startedAt: r.started_at,
-      finishedAt: r.finished_at,
-      keys: JSON.parse(r.keys),
-      tally: r.tally ? JSON.parse(r.tally) : null,
-      simulated: r.simulated ?? 0,
-    };
-
-  const toBlock = (r) =>
-    r && {
-      electionId: r.election_id,
-      index: r.idx,
-      timestamp: r.timestamp,
-      prevHash: r.prev_hash,
-      token: r.token,
-      signature: r.signature,
-      ballot: r.ballot,
-      hash: r.hash,
-      ledgerSignature: r.ledger_sig,
-    };
+  const photosDir = path.join(dataDir, 'photos');
+  const photoFile = (name) => {
+    if (!PHOTO_NAME_RE.test(name)) throw new Error('bad photo name');
+    return path.join(photosDir, name);
+  };
 
   return {
-    close: () => db.close(),
-    transaction(fn) {
-      db.exec('BEGIN IMMEDIATE');
-      try {
-        const result = fn();
-        db.exec('COMMIT');
-        return result;
-      } catch (err) {
-        db.exec('ROLLBACK');
-        throw err;
-      }
+    kind: 'sqlite',
+    close: async () => db.close(),
+
+    // Общий секрет HMAC хранится в DATA_DIR/secret.json.
+    async secret() {
+      const file = path.join(dataDir, 'secret.json');
+      if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf8')).hmac;
+      const secret = crypto.randomBytes(32).toString('hex');
+      fs.writeFileSync(file, JSON.stringify({ hmac: secret }, null, 2), { mode: 0o600 });
+      return secret;
     },
 
-    election: (id) => toElection(q.election.get(id)),
-    elections: () => q.elections.all().map(toElection),
-    activeElection: () => toElection(q.activeElection.get()),
-    lastFinishedElection: () => toElection(q.lastFinished.get()),
-    insertElection: (e) =>
-      q.insertElection.run(e.id, e.title, e.description, JSON.stringify(e.questions), 'draft', e.endsAt, e.createdAt, JSON.stringify(e.keys)),
-    updateElection: (id, e) => q.updateElection.run(e.title, e.description, JSON.stringify(e.questions), e.endsAt, id),
-    startElection: (id, at) => q.startElection.run(at, id),
-    finishElection: (id, at, tally) => q.finishElection.run(at, JSON.stringify(tally), id),
-    deleteElection: (id) => q.deleteElection.run(id),
-    addSimulated: (id, n) => q.addSimulated.run(n, id),
+    election: async (id) => toElection(q.election.get(id)),
+    elections: async () => q.elections.all().map(toElection),
+    activeElection: async () => toElection(q.activeElection.get()),
+    lastFinishedElection: async () => toElection(q.lastFinished.get()),
+    insertElection: async (e) => {
+      q.insertElection.run(e.id, e.title, e.description, JSON.stringify(e.questions), 'draft', e.endsAt, e.createdAt, JSON.stringify(e.keys));
+    },
+    updateElection: async (id, e) => {
+      q.updateElection.run(e.title, e.description, JSON.stringify(e.questions), e.endsAt, id);
+    },
+    startElection: async (id, at) => {
+      q.startElection.run(at, id);
+    },
+    finishElection: async (id, at, tally) => {
+      q.finishElection.run(at, JSON.stringify(tally), id);
+    },
+    deleteElection: async (id) => {
+      q.deleteElection.run(id);
+    },
+    addSimulated: async (id, n) => {
+      q.addSimulated.run(n, id);
+    },
 
-    getVoter: (eid, identity) => q.voter.get(eid, identity),
-    countVotersByIp: (eid, ip) => q.votersByIp.get(eid, ip).n,
-    countVoters: (eid) => q.votersCount.get(eid).n,
-    addVoter: (eid, v) => q.addVoter.run(eid, v.identity, v.ip, v.blinded, v.blindSig, v.issuedAt),
+    getVoter: async (eid, identity) => q.voter.get(eid, identity),
+    countVotersByIp: async (eid, ip) => Number(q.votersByIp.get(eid, ip).n),
+    countVoters: async (eid) => Number(q.votersCount.get(eid).n),
+    addVoter: async (eid, v) => {
+      q.addVoter.run(eid, v.identity, v.ip, v.blinded, v.blindSig, v.issuedAt);
+    },
 
-    lastBlock: (eid) => toBlock(q.lastBlock.get(eid)),
-    blockByToken: (eid, t) => toBlock(q.blockByToken.get(eid, t)),
-    blockByHash: (h) => toBlock(q.blockByHash.get(h)),
-    blockByIndex: (eid, i) => toBlock(q.blockByIndex.get(eid, i)),
-    blocks: (eid, from, limit) => q.blocksRange.all(eid, from, limit).map(toBlock),
-    countBlocks: (eid) => q.blocksCount.get(eid).n,
-    addBlock: (eid, b) =>
-      q.addBlock.run(eid, b.index, b.timestamp, b.prevHash, b.token, b.signature, b.ballot, b.hash, b.ledgerSignature),
+    lastBlock: async (eid) => toBlock(q.lastBlock.get(eid)),
+    blockByToken: async (eid, t) => toBlock(q.blockByToken.get(eid, t)),
+    blockByHash: async (h) => toBlock(q.blockByHash.get(h)),
+    blockByIndex: async (eid, i) => toBlock(q.blockByIndex.get(eid, i)),
+    blocks: async (eid, from, limit) => q.blocksRange.all(eid, from, limit).map(toBlock),
+    countBlocks: async (eid) => Number(q.blocksCount.get(eid).n),
+    addBlock: async (eid, b) => {
+      q.addBlock.run(eid, b.index, b.timestamp, b.prevHash, b.token, b.signature, b.ballot, b.hash, b.ledgerSignature);
+    },
+
+    // Фото участников — файлы в DATA_DIR/photos.
+    async savePhoto(name, data) {
+      fs.mkdirSync(photosDir, { recursive: true });
+      fs.writeFileSync(photoFile(name), data);
+    },
+    async photo(name) {
+      try {
+        return fs.readFileSync(photoFile(name));
+      } catch {
+        return null;
+      }
+    },
+    async deletePhoto(name) {
+      fs.rmSync(photoFile(name), { force: true });
+    },
+
+    // Сырые строки для переноса в PostgreSQL.
+    dump() {
+      return {
+        elections: db.prepare('SELECT * FROM elections').all(),
+        voters: db.prepare('SELECT * FROM voter_ballots').all(),
+        blocks: db.prepare('SELECT * FROM ledger_blocks ORDER BY election_id, idx').all(),
+      };
+    },
   };
 }

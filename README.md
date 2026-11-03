@@ -14,7 +14,7 @@
 
 ## Запуск
 
-Нужен Node.js 22.13 или новее. Внешних зависимостей нет: используются встроенные `node:sqlite` и WebCrypto, шрифты лежат в `public/fonts`.
+Нужен Node.js 22.13 или новее (`npm install`). Данные хранятся в PostgreSQL (если задан `DATABASE_URL`) или во встроенном `node:sqlite`; криптография — WebCrypto, шрифты лежат в `public/fonts`.
 
 ```bash
 ADMIN_TOKEN=придумайте-длинный-ключ VK_CLIENT_ID=id-приложения PUBLIC_URL=https://ваш-домен npm start
@@ -29,7 +29,8 @@ ADMIN_TOKEN=придумайте-длинный-ключ VK_CLIENT_ID=id-при�
 | Переменная | По умолчанию | Назначение |
 |---|---|---|
 | `PORT` | `3000` | порт |
-| `DATA_DIR` | `./data` (на Railway — путь Volume) | база (`vote.db`) с голосованиями и ключами комиссии, секрет (`secret.json`) |
+| `DATABASE_URL` | — | PostgreSQL, например `postgresql://user:pass@192.168.0.5:5432/vypusknik`. Если задан — всё (голосования, ключи, голоса, секрет, фото) хранится в базе, диск не нужен |
+| `DATA_DIR` | `./data` (на Railway — путь Volume) | без `DATABASE_URL`: база SQLite (`vote.db`), секрет (`secret.json`), фото. С `DATABASE_URL`: если там лежат старые данные — при первом запуске они переносятся в PostgreSQL |
 | `ADMIN_TOKEN` | генерируется при старте | ключ для входа в `/admin` |
 | `VK_CLIENT_ID` | — | ID приложения VK ID (см. ниже) |
 | `PUBLIC_URL` | — | адрес сайта без `/` на конце, например `https://vote.example.ru` |
@@ -40,7 +41,16 @@ ADMIN_TOKEN=придумайте-длинный-ключ VK_CLIENT_ID=id-при�
 | `SECURE_COOKIES` | — | `1` при работе по HTTPS |
 
 В продакшене сайт должен работать по **HTTPS**: браузерная криптография (WebCrypto) доступна только в защищённом контексте.
-Папку `data/` нужно резервировать и никому не передавать: в ней закрытые ключи комиссии.
+Базу (или папку `data/`) нужно резервировать и никому не передавать: в ней закрытые ключи комиссии.
+
+Тесты на PostgreSQL: `TEST_DATABASE_URL=postgresql://... npm test` (тестовая база очищается).
+
+## Запуск на Timeweb Cloud (App Platform + PostgreSQL)
+
+1. **Базы данных → PostgreSQL** в той же приватной сети, что и приложение (публичный IP базе не нужен). Для сайта — отдельная база и отдельный пользователь с правами только на неё.
+2. **App Platform → Backend → Express**, Node.js 22+, команда запуска `npm start`, приватная сеть — та же, что у базы.
+3. Переменные: `DATABASE_URL=postgresql://пользователь:пароль@<приватный IP базы>:5432/<база>`, `ADMIN_TOKEN`, `PUBLIC_URL`, `VK_CLIENT_ID`, `TRUST_PROXY=1`, `SECURE_COOKIES=1`.
+   Таблицы сайт создаёт сам (если в схеме `public` нет прав — в своей схеме `vypusknik`). В логе при старте: `Хранилище: PostgreSQL`.
 
 ## Запуск на Railway
 

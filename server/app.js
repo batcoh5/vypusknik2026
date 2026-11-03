@@ -4,8 +4,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
-import { openDb } from './db.js';
-import { loadSecret, generateElectionKeys, electionCrypto } from './keys.js';
+import { openStorage } from './db.js';
+import { hmacWithSecret, generateElectionKeys, electionCrypto } from './keys.js';
 import { createVkIdentity } from './identity.js';
 import { resultsXlsx } from './xlsx.js';
 import {
@@ -147,11 +147,8 @@ export function normalizeElectionInput(body) {
 
 export async function createApp(options = {}) {
   const dataDir = options.dataDir ?? path.join(ROOT, 'data');
-  fs.mkdirSync(dataDir, { recursive: true });
-
-  const photosDir = path.join(dataDir, 'photos');
-  const secret = loadSecret(dataDir);
-  const db = openDb(dataDir);
+  const db = await openStorage({ dataDir, databaseUrl: options.databaseUrl, log: options.log ?? console });
+  const secret = hmacWithSecret(await db.secret());
   const identity = createVkIdentity(secret, {
     vkClientId: options.vkClientId,
     vkHost: options.vkHost,
@@ -165,6 +162,8 @@ export async function createApp(options = {}) {
   const adminToken = options.adminToken;
   const now = options.now ?? (() => new Date());
   const withLedgerLock = createMutex();
+  // Выдача бюллетеней — тоже по одному: проверка «уже выдан?» и запись идут без гонок.
+  const withVoterLock = createMutex();
   const apiLimiter = createRateLimiter({ windowMs: 60_000, max: options.rateLimit ?? 240 });
   const adminFailLimiter = createRateLimiter({ windowMs: 10 * 60_000, max: 20 });
 
@@ -184,22 +183,22 @@ export async function createApp(options = {}) {
   // Завершение: расшифровка, подсчёт и публикация ключа — любой может пересчитать сам.
   async function finish(id) {
     return withLedgerLock(async () => {
-      const election = db.election(id);
+      const election = await db.election(id);
       if (!election) throw new HttpError(404, 'not_found', 'Голосование не найдено');
       if (election.status === 'finished') return election;
       if (election.status !== 'active') throw new HttpError(409, 'not_active', 'Голосование ещё не запущено');
-      const blocks = db.blocks(id, 0, Number.MAX_SAFE_INTEGER);
+      const blocks = await db.blocks(id, 0, Number.MAX_SAFE_INTEGER);
       const privateKey = await importElectionPrivateKey(cryptoFor(election).electionPrivateJwk);
       const tally = await tallyBlocks(election, blocks, privateKey);
       tally.lastBlockHash = blocks.length ? blocks[blocks.length - 1].hash : GENESIS_HASH;
-      db.finishElection(id, now().toISOString(), tally);
+      await db.finishElection(id, now().toISOString(), tally);
       return db.election(id);
     });
   }
 
   // Голосование с датой окончания завершается автоматически.
   async function autoFinish() {
-    const active = db.activeElection();
+    const active = await db.activeElection();
     if (active?.endsAt && Date.parse(active.endsAt) <= now().getTime()) await finish(active.id);
   }
 
@@ -218,7 +217,7 @@ export async function createApp(options = {}) {
     };
   }
 
-  function adminElection(e) {
+  async function adminElection(e) {
     return {
       id: e.id,
       title: e.title,
@@ -230,19 +229,19 @@ export async function createApp(options = {}) {
       startedAt: e.startedAt,
       finishedAt: e.finishedAt,
       tally: e.tally,
-      stats: { ballotsIssued: db.countVoters(e.id), ballotsCast: db.countBlocks(e.id), simulated: e.simulated ?? 0 },
+      stats: { ballotsIssued: await db.countVoters(e.id), ballotsCast: await db.countBlocks(e.id), simulated: e.simulated ?? 0 },
     };
   }
 
   // Публично видны только запущенные и завершённые голосования.
-  function publicElectionById(id) {
-    const e = db.election(id);
+  async function publicElectionById(id) {
+    const e = await db.election(id);
     if (!e || e.status === 'draft') throw new HttpError(404, 'not_found', 'Голосование не найдено');
     return e;
   }
 
-  function activeElectionById(id) {
-    const e = publicElectionById(id);
+  async function activeElectionById(id) {
+    const e = await publicElectionById(id);
     if (e.status !== 'active') throw new HttpError(403, 'not_active', 'Приём голосов в этом голосовании завершён');
     return e;
   }
@@ -282,7 +281,7 @@ export async function createApp(options = {}) {
 
   // Для зрителя: идущее голосование или последнее завершённое (без итогов).
   route('GET', '/api/current', async () => {
-    const e = db.activeElection() ?? db.lastFinishedElection();
+    const e = (await db.activeElection()) ?? (await db.lastFinishedElection());
     return { election: e ? publicElection(e) : null, serverTime: now().toISOString() };
   });
 
@@ -294,20 +293,20 @@ export async function createApp(options = {}) {
   }));
 
   route('GET', '/api/elections/:id', async ({ params }) => ({
-    election: publicElection(publicElectionById(params.id)),
+    election: publicElection(await publicElectionById(params.id)),
     serverTime: now().toISOString(),
   }));
 
   route('GET', '/api/elections/:id/session', async ({ req, params }) => {
-    const e = publicElectionById(params.id);
+    const e = await publicElectionById(params.id);
     const id = identity.identify(req);
-    const voter = id ? db.getVoter(e.id, id) : null;
+    const voter = id ? await db.getVoter(e.id, id) : null;
     return { status: e.status, loggedIn: Boolean(id), ballotIssued: Boolean(voter), blinded: voter?.blinded ?? null };
   });
 
   // Шаг 1: избиратель получает слепую подпись на свой анонимный токен.
   route('POST', '/api/elections/:id/sign', async ({ req, body, params }) => {
-    const e = activeElectionById(params.id);
+    const e = await activeElectionById(params.id);
     const c = cryptoFor(e);
     const id = identity.identify(req);
     if (!id) throw new HttpError(401, 'no_session', 'Войдите через ВКонтакте, чтобы проголосовать');
@@ -316,14 +315,14 @@ export async function createApp(options = {}) {
       throw new HttpError(400, 'bad_request', 'Некорректный запрос');
     }
     const ip = secret.hmac('ip:' + clientIp(req));
-    return db.transaction(() => {
-      const voter = db.getVoter(e.id, id);
+    return withVoterLock(async () => {
+      const voter = await db.getVoter(e.id, id);
       if (voter) {
         // Повтор того же запроса (например, оборвалась связь) — отдаём ту же подпись.
         if (voter.blinded === blinded) return { blindSignature: voter.blind_sig };
         throw new HttpError(409, 'already_issued', 'С этого аккаунта ВКонтакте уже проголосовали в этом голосовании');
       }
-      if (maxPerIp > 0 && db.countVotersByIp(e.id, ip) >= maxPerIp) {
+      if (maxPerIp > 0 && (await db.countVotersByIp(e.id, ip)) >= maxPerIp) {
         throw new HttpError(429, 'ip_limit', 'Превышено число бюллетеней для вашей сети');
       }
       let blindSignature;
@@ -332,14 +331,14 @@ export async function createApp(options = {}) {
       } catch {
         throw new HttpError(400, 'bad_request', 'Некорректный запрос');
       }
-      db.addVoter(e.id, { identity: id, ip, blinded, blindSig: blindSignature, issuedAt: now().toISOString() });
+      await db.addVoter(e.id, { identity: id, ip, blinded, blindSig: blindSignature, issuedAt: now().toISOString() });
       return { blindSignature };
     });
   });
 
   // Шаг 2: анонимная отправка зашифрованного бюллетеня в реестр.
   route('POST', '/api/elections/:id/ballot', async ({ body, params }) => {
-    const e = activeElectionById(params.id);
+    const e = await activeElectionById(params.id);
     const c = cryptoFor(e);
     const token = String(body.token ?? '');
     const signature = String(body.signature ?? '').toLowerCase();
@@ -351,13 +350,13 @@ export async function createApp(options = {}) {
       throw new HttpError(403, 'bad_signature', 'Подпись комиссии на бюллетене недействительна');
     }
     return withLedgerLock(async () => {
-      const existing = db.blockByToken(e.id, token);
+      const existing = await db.blockByToken(e.id, token);
       if (existing) {
         // Повторная отправка того же бюллетеня возвращает ту же квитанцию.
         if (existing.ballot === ballot) return { block: existing, duplicate: true };
         throw new HttpError(409, 'token_used', 'По этому бюллетеню уже проголосовали');
       }
-      if (db.election(e.id)?.status !== 'active') throw new HttpError(403, 'not_active', 'Голосование завершено');
+      if ((await db.election(e.id))?.status !== 'active') throw new HttpError(403, 'not_active', 'Голосование завершено');
       const block = await appendBlock(e, c, token, signature, ballot);
       return { block: { electionId: e.id, ...block } };
     });
@@ -365,7 +364,7 @@ export async function createApp(options = {}) {
 
   // Запись бюллетеня в конец цепочки. Вызывается только внутри withLedgerLock.
   async function appendBlock(e, c, token, signature, ballot) {
-    const last = db.lastBlock(e.id);
+    const last = await db.lastBlock(e.id);
     const ts = now();
     ts.setUTCSeconds(0, 0); // время округляется до минуты, чтобы затруднить сопоставление
     const block = {
@@ -378,7 +377,7 @@ export async function createApp(options = {}) {
     };
     block.hash = await computeBlockHash(block);
     block.ledgerSignature = c.signBlock(block.hash);
-    db.addBlock(e.id, block);
+    await db.addBlock(e.id, block);
     return block;
   }
 
@@ -387,7 +386,7 @@ export async function createApp(options = {}) {
   route('GET', '/api/admin/elections', async ({ req }) => {
     requireAdmin(req);
     return {
-      elections: db.elections().map(adminElection),
+      elections: await Promise.all((await db.elections()).map(adminElection)),
       maxVotesPerIp: maxPerIp,
       storageWarning: options.storageWarning ?? false,
       devTools: options.devTools ?? false,
@@ -400,38 +399,38 @@ export async function createApp(options = {}) {
     requireAdmin(req);
     const input = normalizeElectionInput(body);
     const id = 'e' + crypto.randomBytes(6).toString('hex');
-    db.insertElection({ id, ...input, createdAt: now().toISOString(), keys: generateElectionKeys() });
-    return { election: adminElection(db.election(id)) };
+    await db.insertElection({ id, ...input, createdAt: now().toISOString(), keys: generateElectionKeys() });
+    return { election: await adminElection(await db.election(id)) };
   });
 
   route('PUT', '/api/admin/elections/:id', async ({ req, body, params }) => {
     requireAdmin(req);
-    const e = db.election(params.id);
+    const e = await db.election(params.id);
     if (!e) throw new HttpError(404, 'not_found', 'Голосование не найдено');
     if (e.status !== 'draft') throw new HttpError(409, 'locked', 'Изменять можно только голосование, которое ещё не запущено');
-    db.updateElection(e.id, normalizeElectionInput(body));
-    return { election: adminElection(db.election(e.id)) };
+    await db.updateElection(e.id, normalizeElectionInput(body));
+    return { election: await adminElection(await db.election(e.id)) };
   });
 
   route('POST', '/api/admin/elections/:id/start', async ({ req, params }) => {
     requireAdmin(req);
     return withLedgerLock(async () => {
-      const e = db.election(params.id);
+      const e = await db.election(params.id);
       if (!e) throw new HttpError(404, 'not_found', 'Голосование не найдено');
       if (e.status !== 'draft') throw new HttpError(409, 'bad_state', 'Голосование уже запускалось');
-      const active = db.activeElection();
+      const active = await db.activeElection();
       if (active) throw new HttpError(409, 'busy', `Сначала завершите текущее голосование «${active.title}»`);
       if (e.endsAt && Date.parse(e.endsAt) <= now().getTime()) {
         throw new HttpError(409, 'bad_state', 'Дата окончания уже прошла — измените её');
       }
-      db.startElection(e.id, now().toISOString());
-      return { election: adminElection(db.election(e.id)) };
+      await db.startElection(e.id, now().toISOString());
+      return { election: await adminElection(await db.election(e.id)) };
     });
   });
 
   route('POST', '/api/admin/elections/:id/finish', async ({ req, params }) => {
     requireAdmin(req);
-    return { election: adminElection(await finish(params.id)) };
+    return { election: await adminElection(await finish(params.id)) };
   });
 
   // Фото участника: картинка уже уменьшена в браузере, сервер только проверяет и сохраняет.
@@ -448,8 +447,7 @@ export async function createApp(options = {}) {
     if (!magic[m[1]] || buf.length > 3 * 1024 * 1024) throw new HttpError(400, 'invalid', 'Файл не похож на картинку или больше 3 МБ');
     const ext = { jpeg: 'jpg', png: 'png', webp: 'webp' }[m[1]];
     const name = `${crypto.randomBytes(12).toString('hex')}.${ext}`;
-    fs.mkdirSync(photosDir, { recursive: true });
-    fs.writeFileSync(path.join(photosDir, name), buf);
+    await db.savePhoto(name, buf);
     return { url: `/photos/${name}` };
   });
 
@@ -458,7 +456,7 @@ export async function createApp(options = {}) {
   route('POST', '/api/admin/elections/:id/simulate', async ({ req, body, params }) => {
     requireAdmin(req);
     if (!options.devTools) throw new HttpError(403, 'disabled', 'Симуляция выключена (включается переменной DEV_TOOLS=1)');
-    const e = activeElectionById(params.id);
+    const e = await activeElectionById(params.id);
     const q = e.questions[0];
     let choices = [];
     if (body.mode === 'manual') {
@@ -486,22 +484,22 @@ export async function createApp(options = {}) {
     const c = cryptoFor(e);
     const electionKey = await importElectionPublicKey(c.public.election);
     return withLedgerLock(async () => {
-      if (db.election(e.id)?.status !== 'active') throw new HttpError(403, 'not_active', 'Голосование завершено');
+      if ((await db.election(e.id))?.status !== 'active') throw new HttpError(403, 'not_active', 'Голосование завершено');
       for (const cid of choices) {
         const token = bytesToHex(randomBytes(32));
         const fdh = bytesToHex(bigIntToBytes(await fullDomainHash(token, c.rsaPub), c.rsaPub.bytes));
         const ballot = await encryptBallot(e.id, { [q.id]: cid }, electionKey);
         await appendBlock(e, c, token, c.blindSign(fdh), ballot);
       }
-      db.addSimulated(e.id, choices.length);
-      return { added: choices.length, election: adminElection(db.election(e.id)) };
+      await db.addSimulated(e.id, choices.length);
+      return { added: choices.length, election: await adminElection(await db.election(e.id)) };
     });
   });
 
   // Итоги в Excel: баллы = голоса / всего × 160 (формулой).
   route('GET', '/api/admin/elections/:id/results.xlsx', async ({ req, res, params }) => {
     requireAdmin(req);
-    const e = db.election(params.id);
+    const e = await db.election(params.id);
     if (!e) throw new HttpError(404, 'not_found', 'Голосование не найдено');
     if (!e.tally) throw new HttpError(409, 'not_finished', 'Итоги появятся после завершения голосования');
     const q = e.questions[0];
@@ -523,14 +521,14 @@ export async function createApp(options = {}) {
   route('DELETE', '/api/admin/elections/:id', async ({ req, params }) => {
     requireAdmin(req);
     return withLedgerLock(async () => {
-      const e = db.election(params.id);
+      const e = await db.election(params.id);
       if (!e) throw new HttpError(404, 'not_found', 'Голосование не найдено');
       if (e.status === 'active') throw new HttpError(409, 'bad_state', 'Сначала завершите голосование');
-      db.deleteElection(e.id);
+      await db.deleteElection(e.id);
       cryptoCache.delete(e.id);
       // Вместе с голосованием удаляются и фото его участников.
       for (const c of e.questions.flatMap((q) => q.candidates)) {
-        if (c.photo && PHOTO_RE.test(c.photo)) fs.rmSync(path.join(photosDir, path.basename(c.photo)), { force: true });
+        if (c.photo && PHOTO_RE.test(c.photo)) await db.deletePhoto(path.basename(c.photo));
       }
       return { deleted: e.id };
     });
@@ -573,24 +571,19 @@ export async function createApp(options = {}) {
     });
   }
 
-  // Фото участников лежат в DATA_DIR/photos (на Railway — на Volume).
-  function servePhoto(req, res, url) {
+  // Фото участников лежат в базе (или в DATA_DIR/photos для SQLite).
+  async function servePhoto(req, res, url) {
     if (!PHOTO_RE.test(url.pathname)) return false;
-    const file = path.join(photosDir, path.basename(url.pathname));
-    let stat;
-    try {
-      stat = fs.statSync(file);
-    } catch {
-      return false;
-    }
+    const name = path.basename(url.pathname);
+    const data = await db.photo(name);
+    if (!data) return false;
     res.writeHead(200, {
-      'Content-Type': MIME[path.extname(file)] ?? 'application/octet-stream',
-      'Content-Length': stat.size,
+      'Content-Type': MIME[path.extname(name)] ?? 'application/octet-stream',
+      'Content-Length': data.length,
       'Cache-Control': 'public, max-age=86400, immutable',
       ...SECURITY_HEADERS,
     });
-    if (req.method === 'HEAD') res.end();
-    else fs.createReadStream(file).pipe(res);
+    res.end(req.method === 'HEAD' ? undefined : data);
     return true;
   }
 
@@ -679,7 +672,7 @@ export async function createApp(options = {}) {
           res.writeHead(301, { Location: '/' + url.search, ...SECURITY_HEADERS });
           return res.end();
         }
-        if (servePhoto(req, res, url) || serveStatic(req, res, url)) return;
+        if ((await servePhoto(req, res, url)) || serveStatic(req, res, url)) return;
       }
       res.writeHead(404, { 'Content-Type': 'text/html; charset=utf-8', ...SECURITY_HEADERS });
       res.end(fs.readFileSync(path.join(PUBLIC_DIR, '404.html')));
@@ -693,6 +686,8 @@ export async function createApp(options = {}) {
   const server = http.createServer((req, res) => {
     handle(req, res);
   });
-  server.on('close', () => db.close());
+  server.on('close', () => {
+    db.close().catch(() => {});
+  });
   return { server, db };
 }

@@ -4,21 +4,11 @@
 //  - election:  ECDH P-256, шифрование бюллетеней (закрытая часть публикуется
 //               только после завершения голосования);
 //  - ledger:    ECDSA P-256, подпись блоков реестра (квитанции избирателей).
-// Общий для сайта секрет HMAC хранится в DATA_DIR/secret.json.
+// Общий для сайта секрет HMAC хранится в базе (см. db.js).
 
 import crypto from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
 
-export function loadSecret(dataDir) {
-  const file = path.join(dataDir, 'secret.json');
-  let secret;
-  if (fs.existsSync(file)) {
-    secret = JSON.parse(fs.readFileSync(file, 'utf8')).hmac;
-  } else {
-    secret = crypto.randomBytes(32).toString('hex');
-    fs.writeFileSync(file, JSON.stringify({ hmac: secret }, null, 2), { mode: 0o600 });
-  }
+export function hmacWithSecret(secret) {
   return {
     hmac: (value) => crypto.createHmac('sha256', secret).update(value).digest('hex'),
   };

@@ -9,20 +9,23 @@ if (!adminToken) {
   console.warn(`ADMIN_TOKEN не задан. Временный ключ администратора: ${adminToken}`);
 }
 
-// Railway: данные должны лежать на подключённом Volume, иначе они стираются при каждом деплое.
+// С DATABASE_URL всё хранится в PostgreSQL. Без него — в SQLite-файле в DATA_DIR.
+// Railway: SQLite должен лежать на подключённом Volume, иначе данные стираются при каждом деплое.
+const databaseUrl = env.DATABASE_URL || undefined;
 const onRailway = Boolean(env.RAILWAY_ENVIRONMENT || env.RAILWAY_PROJECT_ID);
 const volume = env.RAILWAY_VOLUME_MOUNT_PATH;
 const dataDir = env.DATA_DIR ?? volume;
-const ephemeral = onRailway && (!volume || !(dataDir ?? '').startsWith(volume));
+const ephemeral = !databaseUrl && onRailway && (!volume || !(dataDir ?? '').startsWith(volume));
 if (ephemeral) {
   console.error(
     'ВНИМАНИЕ: данные не сохранятся после деплоя! Подключите к сервису Volume (Settings → Volumes) ' +
-      'и уберите DATA_DIR или укажите в нём путь Volume.',
+      'и уберите DATA_DIR или укажите в нём путь Volume. Или подключите PostgreSQL (DATABASE_URL).',
   );
 }
 
-const { server } = await createApp({
+const { server, db } = await createApp({
   dataDir,
+  databaseUrl,
   storageWarning: ephemeral,
   adminToken,
   maxVotesPerIp: Number(env.MAX_VOTES_PER_IP ?? 0),
@@ -48,6 +51,7 @@ if (env.DEV_LOGIN === '1') {
 const port = Number(env.PORT ?? 3000);
 server.listen(port, env.HOST ?? '0.0.0.0', () => {
   console.log(`Выпускник Краснообска 2026: сайт голосования запущен на http://localhost:${port}`);
+  console.log(db.kind === 'postgres' ? 'Хранилище: PostgreSQL' : `Хранилище: SQLite (${dataDir ?? './data'})`);
 });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {

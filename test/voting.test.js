@@ -22,10 +22,24 @@ let base;
 let dataDir;
 const ADMIN = 'test-admin-token';
 
+// TEST_DATABASE_URL=postgresql://... — прогнать те же тесты на PostgreSQL (база очищается!).
+const PG_URL = process.env.TEST_DATABASE_URL;
+
+async function resetPostgres(url) {
+  const { default: pg } = await import('pg');
+  const c = new pg.Client({ connectionString: url });
+  await c.connect();
+  await c.query('DROP TABLE IF EXISTS ledger_blocks, voter_ballots, elections, photos, settings');
+  await c.query('DROP SCHEMA IF EXISTS vypusknik CASCADE');
+  await c.end();
+}
+
 before(async () => {
   dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vyp-'));
+  if (PG_URL) await resetPostgres(PG_URL);
   app = await createApp({
     dataDir,
+    databaseUrl: PG_URL,
     adminToken: ADMIN,
     devLogin: true,
     vkClientId: '51234567',
@@ -195,8 +209,8 @@ test('полный цикл: создать, запустить, проголо�
 
   // Итоги видны только в админке и совпадают с пересчётом по реестру.
   assert.equal((await client()('GET', `/api/elections/${id}`)).data.election.tally, undefined);
-  const e = app.db.election(id);
-  const blocks = app.db.blocks(id, 0, 1000);
+  const e = await app.db.election(id);
+  const blocks = await app.db.blocks(id, 0, 1000);
   const { electionCrypto } = await import('../server/keys.js');
   const priv = await importElectionPrivateKey(electionCrypto(e.keys).electionPrivateJwk);
   assert.deepEqual((await tallyBlocks(e, blocks, priv)).counts, tally.counts);
@@ -215,9 +229,9 @@ test('полный цикл: создать, запустить, проголо�
   assert.equal((await client()('GET', '/api/current')).data.election, null);
   assert.equal((await client()('GET', `/api/elections/${id}`)).status, 404);
   // От удалённого голосования на сервере не остаётся ничего: ни бюллетеней, ни выданных подписей, ни меток.
-  assert.equal(app.db.election(id), undefined);
-  assert.equal(app.db.countBlocks(id), 0);
-  assert.equal(app.db.countVoters(id), 0);
+  assert.equal(await app.db.election(id), undefined);
+  assert.equal(await app.db.countBlocks(id), 0);
+  assert.equal(await app.db.countVoters(id), 0);
 
   const second = (await asAdmin('POST', '/api/admin/elections', SAMPLE)).data.election.id;
   await asAdmin('POST', `/api/admin/elections/${second}/start`);
