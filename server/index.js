@@ -3,6 +3,9 @@ import { createApp } from './app.js';
 
 const env = process.env;
 
+// В переменных окружения — только секреты: ADMIN_TOKEN, DATABASE_URL, VK_CLIENT_ID.
+// Остальное настроено в коде.
+
 let adminToken = env.ADMIN_TOKEN;
 if (!adminToken) {
   adminToken = crypto.randomBytes(18).toString('base64url');
@@ -29,10 +32,11 @@ const { server, db } = await createApp({
   storageWarning: ephemeral,
   adminToken,
   maxVotesPerIp: Number(env.MAX_VOTES_PER_IP ?? 0),
-  trustProxy: env.TRUST_PROXY === '1',
-  secureCookies: env.SECURE_COOKIES === '1',
+  // Хостинг (Timeweb, Railway) всегда стоит за прокси: адрес посетителя и домен берутся из X-Forwarded-*.
+  // TRUST_PROXY=0 — если сайт запущен без прокси и открыт напрямую в интернет.
+  trustProxy: env.TRUST_PROXY !== '0',
+  // Адрес сайта для входа через ВК берётся из запроса, Secure-cookie ставятся автоматически по HTTPS.
   vkClientId: env.VK_CLIENT_ID,
-  publicUrl: env.PUBLIC_URL,
   devLogin: env.DEV_LOGIN === '1',
   devTools: env.DEV_TOOLS === '1',
 });
@@ -41,8 +45,8 @@ if (env.DEV_TOOLS === '1') {
   console.warn('Включена симуляция голосов (DEV_TOOLS=1) — только для проверки, выключите перед настоящим голосованием!');
 }
 
-if (!env.VK_CLIENT_ID || !env.PUBLIC_URL) {
-  console.warn('Вход через ВКонтакте не настроен: задайте VK_CLIENT_ID и PUBLIC_URL (см. README).');
+if (!env.VK_CLIENT_ID) {
+  console.warn('Вход через ВКонтакте не настроен: задайте VK_CLIENT_ID (см. README).');
 }
 if (env.DEV_LOGIN === '1') {
   console.warn('Включён тестовый вход без ВКонтакте (DEV_LOGIN=1). Не используйте его на настоящем голосовании!');

@@ -153,7 +153,8 @@ export async function createApp(options = {}) {
     vkClientId: options.vkClientId,
     vkHost: options.vkHost,
     publicUrl: options.publicUrl,
-    secureCookies: options.secureCookies ?? false,
+    secureCookies: options.secureCookies,
+    origin: (req) => requestOrigin(req),
     devLogin: options.devLogin ?? false,
     fetch: options.fetch,
   });
@@ -257,6 +258,21 @@ export async function createApp(options = {}) {
       if (fwd) return fwd.split(',').at(-1).trim();
     }
     return req.socket.remoteAddress ?? 'unknown';
+  }
+
+  // Адрес, с которого открыт сайт (https://домен). За прокси — из X-Forwarded-*.
+  // Если протокол неизвестен, для настоящих доменов считаем HTTPS, для localhost и IP — HTTP.
+  function requestOrigin(req) {
+    const first = (v) => String(v ?? '').split(',')[0].trim();
+    const valid = (h) => /^[A-Za-z0-9.-]+(:\d{1,5})?$/.test(h);
+    const forwarded = trustProxy ? first(req.headers['x-forwarded-host']) : '';
+    const host = [forwarded, first(req.headers.host)].find(valid) ?? 'localhost';
+    let proto = trustProxy ? first(req.headers['x-forwarded-proto']).toLowerCase() : '';
+    if (proto !== 'https' && proto !== 'http') {
+      const local = /^(localhost|\d+\.\d+\.\d+\.\d+)(:\d+)?$/.test(host);
+      proto = req.socket.encrypted || !local ? 'https' : 'http';
+    }
+    return `${proto}://${host.toLowerCase()}`;
   }
 
   function requireAdmin(req) {

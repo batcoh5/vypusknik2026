@@ -394,3 +394,47 @@ test('без DEV_TOOLS симуляция выключена', async () => {
   await new Promise((r) => plain.server.close(r));
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('адрес сайта для VK ID берётся из запроса: любой домен, HTTPS → Secure-cookie', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vyp-'));
+  const site = await createApp({ dataDir: dir, adminToken: ADMIN, vkClientId: '51234567', trustProxy: true, fetch: fakeVk });
+  await new Promise((r) => site.server.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${site.server.address().port}`;
+  const get = (p, headers = {}) => fetch(url + p, { redirect: 'manual', headers });
+  t.after(async () => {
+    site.server.closeAllConnections();
+    await new Promise((r) => site.server.close(r));
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const cookiesOf = (res) => res.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ');
+
+  // Зашли с основного домена через прокси хостинга (HTTPS).
+  const viaProxy = { 'x-forwarded-proto': 'https', 'x-forwarded-host': 'vypusknik2026.ru' };
+  const start = await get('/auth/vk/start', viaProxy);
+  const auth = new URL(start.headers.get('location'));
+  assert.equal(auth.searchParams.get('redirect_uri'), 'https://vypusknik2026.ru/auth/vk/callback');
+  assert.ok(start.headers.getSetCookie().every((c) => c.includes('; Secure')));
+  // Обмен кода — с тем же адресом, что и при начале входа.
+  vkCalls.length = 0;
+  const done = await get(`/auth/vk/callback?code=good-code&state=${auth.searchParams.get('state')}&device_id=dev-1`, {
+    ...viaProxy,
+    cookie: cookiesOf(start),
+  });
+  assert.equal(done.headers.get('location'), '/');
+  assert.equal(vkCalls.find((c) => c.url.endsWith('/oauth2/auth')).params.redirect_uri, 'https://vypusknik2026.ru/auth/vk/callback');
+  assert.ok(done.headers.getSetCookie().some((c) => c.startsWith('vks=') && c.includes('; Secure')));
+
+  // Технический домен хостинга — тоже работает, со своим адресом возврата.
+  const tw = await get('/auth/vk/start', { 'x-forwarded-proto': 'https', 'x-forwarded-host': 'batcoh5-vypusknik2026-1bbe.twc1.net' });
+  assert.equal(new URL(tw.headers.get('location')).searchParams.get('redirect_uri'), 'https://batcoh5-vypusknik2026-1bbe.twc1.net/auth/vk/callback');
+  // Прокси не сообщил протокол: настоящий домен считается HTTPS.
+  const noProto = await get('/auth/vk/start', { 'x-forwarded-host': 'vypusknik2026.ru' });
+  assert.equal(new URL(noProto.headers.get('location')).searchParams.get('redirect_uri'), 'https://vypusknik2026.ru/auth/vk/callback');
+  // Локально по HTTP — без Secure, иначе браузер не сохранит cookie.
+  const local = await get('/auth/vk/start');
+  assert.match(new URL(local.headers.get('location')).searchParams.get('redirect_uri'), /^http:\/\/127\.0\.0\.1:\d+\/auth\/vk\/callback$/);
+  assert.ok(local.headers.getSetCookie().every((c) => !c.includes('Secure')));
+  // Мусор в заголовке Host не попадает в адрес возврата.
+  const junk = await get('/auth/vk/start', { 'x-forwarded-host': 'evil.example/x?y=' });
+  assert.match(new URL(junk.headers.get('location')).searchParams.get('redirect_uri'), /^http:\/\/127\.0\.0\.1:\d+\//);
+});
