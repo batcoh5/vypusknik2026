@@ -22,10 +22,24 @@ let base;
 let dataDir;
 const ADMIN = 'test-admin-token';
 
+// TEST_DATABASE_URL=postgresql://... — прогнать те же тесты на PostgreSQL (база очищается!).
+const PG_URL = process.env.TEST_DATABASE_URL;
+
+async function resetPostgres(url) {
+  const { default: pg } = await import('pg');
+  const c = new pg.Client({ connectionString: url });
+  await c.connect();
+  await c.query('DROP TABLE IF EXISTS ledger_blocks, voter_ballots, elections, photos, settings');
+  await c.query('DROP SCHEMA IF EXISTS vypusknik CASCADE');
+  await c.end();
+}
+
 before(async () => {
   dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vyp-'));
+  if (PG_URL) await resetPostgres(PG_URL);
   app = await createApp({
     dataDir,
+    databaseUrl: PG_URL,
     adminToken: ADMIN,
     devLogin: true,
     vkClientId: '51234567',
@@ -195,8 +209,8 @@ test('полный цикл: создать, запустить, проголо�
 
   // Итоги видны только в админке и совпадают с пересчётом по реестру.
   assert.equal((await client()('GET', `/api/elections/${id}`)).data.election.tally, undefined);
-  const e = app.db.election(id);
-  const blocks = app.db.blocks(id, 0, 1000);
+  const e = await app.db.election(id);
+  const blocks = await app.db.blocks(id, 0, 1000);
   const { electionCrypto } = await import('../server/keys.js');
   const priv = await importElectionPrivateKey(electionCrypto(e.keys).electionPrivateJwk);
   assert.deepEqual((await tallyBlocks(e, blocks, priv)).counts, tally.counts);
@@ -215,9 +229,9 @@ test('полный цикл: создать, запустить, проголо�
   assert.equal((await client()('GET', '/api/current')).data.election, null);
   assert.equal((await client()('GET', `/api/elections/${id}`)).status, 404);
   // От удалённого голосования на сервере не остаётся ничего: ни бюллетеней, ни выданных подписей, ни меток.
-  assert.equal(app.db.election(id), undefined);
-  assert.equal(app.db.countBlocks(id), 0);
-  assert.equal(app.db.countVoters(id), 0);
+  assert.equal(await app.db.election(id), undefined);
+  assert.equal(await app.db.countBlocks(id), 0);
+  assert.equal(await app.db.countVoters(id), 0);
 
   const second = (await asAdmin('POST', '/api/admin/elections', SAMPLE)).data.election.id;
   await asAdmin('POST', `/api/admin/elections/${second}/start`);
@@ -379,4 +393,48 @@ test('без DEV_TOOLS симуляция выключена', async () => {
   assert.equal(res.status, 403);
   await new Promise((r) => plain.server.close(r));
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('адрес сайта для VK ID берётся из запроса: любой домен, HTTPS → Secure-cookie', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vyp-'));
+  const site = await createApp({ dataDir: dir, adminToken: ADMIN, vkClientId: '51234567', trustProxy: true, fetch: fakeVk });
+  await new Promise((r) => site.server.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${site.server.address().port}`;
+  const get = (p, headers = {}) => fetch(url + p, { redirect: 'manual', headers });
+  t.after(async () => {
+    site.server.closeAllConnections();
+    await new Promise((r) => site.server.close(r));
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const cookiesOf = (res) => res.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ');
+
+  // Зашли с основного домена через прокси хостинга (HTTPS).
+  const viaProxy = { 'x-forwarded-proto': 'https', 'x-forwarded-host': 'vypusknik2026.ru' };
+  const start = await get('/auth/vk/start', viaProxy);
+  const auth = new URL(start.headers.get('location'));
+  assert.equal(auth.searchParams.get('redirect_uri'), 'https://vypusknik2026.ru/auth/vk/callback');
+  assert.ok(start.headers.getSetCookie().every((c) => c.includes('; Secure')));
+  // Обмен кода — с тем же адресом, что и при начале входа.
+  vkCalls.length = 0;
+  const done = await get(`/auth/vk/callback?code=good-code&state=${auth.searchParams.get('state')}&device_id=dev-1`, {
+    ...viaProxy,
+    cookie: cookiesOf(start),
+  });
+  assert.equal(done.headers.get('location'), '/');
+  assert.equal(vkCalls.find((c) => c.url.endsWith('/oauth2/auth')).params.redirect_uri, 'https://vypusknik2026.ru/auth/vk/callback');
+  assert.ok(done.headers.getSetCookie().some((c) => c.startsWith('vks=') && c.includes('; Secure')));
+
+  // Технический домен хостинга — тоже работает, со своим адресом возврата.
+  const tw = await get('/auth/vk/start', { 'x-forwarded-proto': 'https', 'x-forwarded-host': 'batcoh5-vypusknik2026-1bbe.twc1.net' });
+  assert.equal(new URL(tw.headers.get('location')).searchParams.get('redirect_uri'), 'https://batcoh5-vypusknik2026-1bbe.twc1.net/auth/vk/callback');
+  // Прокси не сообщил протокол: настоящий домен считается HTTPS.
+  const noProto = await get('/auth/vk/start', { 'x-forwarded-host': 'vypusknik2026.ru' });
+  assert.equal(new URL(noProto.headers.get('location')).searchParams.get('redirect_uri'), 'https://vypusknik2026.ru/auth/vk/callback');
+  // Локально по HTTP — без Secure, иначе браузер не сохранит cookie.
+  const local = await get('/auth/vk/start');
+  assert.match(new URL(local.headers.get('location')).searchParams.get('redirect_uri'), /^http:\/\/127\.0\.0\.1:\d+\/auth\/vk\/callback$/);
+  assert.ok(local.headers.getSetCookie().every((c) => !c.includes('Secure')));
+  // Мусор в заголовке Host не попадает в адрес возврата.
+  const junk = await get('/auth/vk/start', { 'x-forwarded-host': 'evil.example/x?y=' });
+  assert.match(new URL(junk.headers.get('location')).searchParams.get('redirect_uri'), /^http:\/\/127\.0\.0\.1:\d+\//);
 });
