@@ -165,7 +165,9 @@ export async function createApp(options = {}) {
   const withLedgerLock = createMutex();
   // Выдача бюллетеней — тоже по одному: проверка «уже выдан?» и запись идут без гонок.
   const withVoterLock = createMutex();
-  const apiLimiter = createRateLimiter({ windowMs: 60_000, max: options.rateLimit ?? 240 });
+  // Лимит на IP — защита от перегрузки, а не от накруток (один голос = один аккаунт ВКонтакте).
+  // Он высокий, потому что в зале через общий Wi-Fi у сотен зрителей один внешний адрес.
+  const apiLimiter = createRateLimiter({ windowMs: 60_000, max: options.rateLimit ?? 6000 });
   const adminFailLimiter = createRateLimiter({ windowMs: 10 * 60_000, max: 20 });
 
   const cryptoCache = new Map();
@@ -197,10 +199,16 @@ export async function createApp(options = {}) {
     });
   }
 
-  // Голосование с датой окончания завершается автоматически.
+  // Голосование с датой окончания завершается автоматически. Проверка — не чаще раза в секунду,
+  // чтобы не делать лишний запрос к базе на каждый запрос посетителя; голоса после даты окончания
+  // не принимаются и без неё (см. activeElectionById).
+  let lastAutoFinish = -Infinity;
   async function autoFinish() {
+    const t = now().getTime();
+    if (t - lastAutoFinish < 1000 && t >= lastAutoFinish) return;
+    lastAutoFinish = t;
     const active = await db.activeElection();
-    if (active?.endsAt && Date.parse(active.endsAt) <= now().getTime()) await finish(active.id);
+    if (active?.endsAt && Date.parse(active.endsAt) <= t) await finish(active.id);
   }
 
   function publicElection(e) {
@@ -243,19 +251,19 @@ export async function createApp(options = {}) {
 
   async function activeElectionById(id) {
     const e = await publicElectionById(id);
-    if (e.status !== 'active') throw new HttpError(403, 'not_active', 'Приём голосов в этом голосовании завершён');
+    if (e.status !== 'active' || (e.endsAt && Date.parse(e.endsAt) <= now().getTime())) {
+      throw new HttpError(403, 'not_active', 'Приём голосов в этом голосовании завершён');
+    }
     return e;
   }
 
-  // За прокси (Railway, nginx) реальный адрес приходит в заголовке. X-Real-IP
-  // выставляет сам прокси; в X-Forwarded-For надёжен только последний адрес —
-  // первые клиент может подставить сам.
+  // За прокси хостинга реальный адрес — последний в X-Forwarded-For: его дописывает сам прокси,
+  // а всё, что левее, клиент может подставить сам. X-Real-IP не используется: прокси Timeweb
+  // пропускает его от клиента как есть, и по нему можно было обойти ограничения по IP.
   function clientIp(req) {
     if (trustProxy) {
-      const real = req.headers['x-real-ip'];
-      if (real) return String(real).trim();
       const fwd = req.headers['x-forwarded-for'];
-      if (fwd) return fwd.split(',').at(-1).trim();
+      if (fwd) return String(fwd).split(',').at(-1).trim();
     }
     return req.socket.remoteAddress ?? 'unknown';
   }

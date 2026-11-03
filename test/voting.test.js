@@ -438,3 +438,23 @@ test('адрес сайта для VK ID берётся из запроса: л�
   const junk = await get('/auth/vk/start', { 'x-forwarded-host': 'evil.example/x?y=' });
   assert.match(new URL(junk.headers.get('location')).searchParams.get('redirect_uri'), /^http:\/\/127\.0\.0\.1:\d+\//);
 });
+
+test('адрес посетителя за прокси: только последний X-Forwarded-For, X-Real-IP не подделать', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vyp-'));
+  const site = await createApp({ dataDir: dir, adminToken: ADMIN, trustProxy: true, rateLimit: 3 });
+  await new Promise((r) => site.server.listen(0, '127.0.0.1', r));
+  t.after(async () => {
+    site.server.closeAllConnections();
+    await new Promise((r) => site.server.close(r));
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const url = `http://127.0.0.1:${site.server.address().port}/api/me`;
+  const hit = (headers) => fetch(url, { headers }).then((r) => r.status);
+  // Один настоящий адрес (последний в X-Forwarded-For) — лимит срабатывает, как бы ни менялся X-Real-IP
+  // и подставленное клиентом начало X-Forwarded-For.
+  const codes = [];
+  for (let i = 0; i < 5; i++) codes.push(await hit({ 'x-real-ip': `10.0.0.${i}`, 'x-forwarded-for': `10.1.0.${i}, 198.51.100.7` }));
+  assert.deepEqual(codes, [200, 200, 200, 429, 429]);
+  // Другой посетитель — свой счётчик.
+  assert.equal(await hit({ 'x-forwarded-for': '198.51.100.8' }), 200);
+});
