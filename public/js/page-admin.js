@@ -40,9 +40,9 @@ function showLogin(error = '') {
     <div class="card card--pad">
       <div class="icon-box">${icons.lock}</div>
       <h3>Вход для оргкомитета</h3>
-      <p class="small muted top-gap-xs">Ключ администратора задаётся переменной окружения ADMIN_TOKEN при запуске сервера.</p>
+      <p class="small muted top-gap-xs">Здесь оргкомитет создаёт голосования, запускает их и смотрит итоги. Введите пароль администратора.</p>
       <form class="row top-gap-sm" id="login">
-        <input class="input" type="password" id="token" placeholder="Ключ администратора" autocomplete="current-password" aria-label="Ключ администратора">
+        <input class="input" type="password" id="token" placeholder="Пароль" autocomplete="current-password" aria-label="Пароль администратора">
         <button class="btn btn--brand" type="submit">Войти ${icons.arrow}</button>
       </form>
       ${error ? note('danger', 'Не удалось войти', escapeHtml(error)) : ''}

@@ -283,7 +283,7 @@ export async function createApp(options = {}) {
     const ok = adminToken && given.length === expected.length && crypto.timingSafeEqual(given, expected);
     if (!ok) {
       if (!adminFailLimiter(ip)) throw new HttpError(429, 'rate_limited', 'Слишком много попыток входа. Подождите 10 минут');
-      throw new HttpError(401, 'unauthorized', 'Неверный ключ администратора');
+      throw new HttpError(401, 'unauthorized', 'Неверный пароль');
     }
   }
 
